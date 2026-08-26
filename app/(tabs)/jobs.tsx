@@ -1,8 +1,12 @@
-import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router, useFocusEffect } from "expo-router";
+import { CheckSquare, Square } from "lucide-react-native";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Linking,
+  Modal,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -48,10 +52,15 @@ export default function JobsScreen() {
   const [filter, setFilter] = useState<
     "all" | "pending" | "in_progress" | "done"
   >("all");
+  const [confirmModal, setConfirmModal] = useState(false);
+  const [jobToComplete, setJobToComplete] = useState<Job | null>(null);
+  const [dontAskAgain, setDontAskAgain] = useState(false);
 
-  useEffect(() => {
-    fetchJobs();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchJobs();
+    }, []),
+  );
 
   const fetchJobs = async () => {
     setLoading(true);
@@ -100,17 +109,74 @@ export default function JobsScreen() {
     ]);
   };
 
-  const cycleStatus = (job: Job) => {
+  const cycleStatus = async (job: Job) => {
     const currentIndex = STATUS_ORDER.indexOf(job.status);
     const nextStatus = STATUS_ORDER[(currentIndex + 1) % STATUS_ORDER.length];
-    Alert.alert(
-      "Update Status",
-      `Change status to "${STATUS_LABELS[nextStatus]}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Update", onPress: () => updateStatus(job.id, nextStatus) },
-      ],
-    );
+
+    if (nextStatus === "done") {
+      // NOTE: Temporarily ignoring AsyncStorage so you aren't locked out of testing the modal!
+      setJobToComplete(job);
+      setConfirmModal(true);
+    } else {
+      Alert.alert(
+        "Update Status",
+        `Change status to "${STATUS_LABELS[nextStatus]}"?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Update", onPress: () => updateStatus(job.id, nextStatus) },
+        ],
+      );
+    }
+  };
+
+  const finalizeJob = async (job: Job, method: "sms" | "whatsapp" | "none") => {
+    await updateStatus(job.id, "done");
+
+    if (method !== "none") {
+      const savedSettings = await AsyncStorage.getItem("business_settings");
+      let template = "Hi {name}, your job is completed and ready!";
+      if (savedSettings) {
+        template = JSON.parse(savedSettings).completionMessage || template;
+      }
+      const personalizedMessage = template.replace("{name}", job.customer_name);
+
+      let phoneToText = "";
+      const { data: customerData } = await supabase
+        .from("customers")
+        .select("phone")
+        .eq("name", job.customer_name)
+        .limit(1)
+        .single();
+
+      if (customerData?.phone) {
+        // Strip everything except raw numbers
+        phoneToText = customerData.phone.replace(/\D/g, "");
+      }
+
+      if (method === "whatsapp") {
+        try {
+          let cleanNumber = phoneToText;
+          // Force strict Nigerian/International formatting
+          if (cleanNumber.startsWith("0"))
+            cleanNumber = cleanNumber.substring(1);
+          if (!cleanNumber.startsWith("234")) cleanNumber = "234" + cleanNumber;
+
+          // Use the bulletproof universal web link
+          const url = `https://wa.me/${cleanNumber}?text=${encodeURIComponent(personalizedMessage)}`;
+          await Linking.openURL(url);
+        } catch (error) {
+          Alert.alert("Error", "Could not route to WhatsApp.");
+        }
+      } else {
+        // Standard SMS
+        Linking.openURL(
+          `sms:${phoneToText}?body=${encodeURIComponent(personalizedMessage)}`,
+        );
+      }
+    }
+
+    setConfirmModal(false);
+    setJobToComplete(null);
   };
 
   const filtered =
@@ -178,7 +244,7 @@ export default function JobsScreen() {
                   <Text style={styles.jobMetaText}>📅 {job.date}</Text>
                 ) : null}
                 {job.time ? (
-                  <Text style={styles.jobMetaText}>🕐 {job.time}</Text>
+                  <Text style={styles.jobMetaText}>⏰ {job.time}</Text>
                 ) : null}
                 {job.notes ? (
                   <Text style={styles.jobMetaText} numberOfLines={1}>
@@ -221,6 +287,77 @@ export default function JobsScreen() {
           ))}
         </ScrollView>
       )}
+
+      <Modal visible={confirmModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Job Completed! 🎉</Text>
+            <Text style={styles.modalSubtitle}>
+              Would you like to send a completion text message to{" "}
+              {jobToComplete?.customer_name}?
+            </Text>
+
+            <TouchableOpacity
+              style={styles.checkboxRow}
+              onPress={() => setDontAskAgain(!dontAskAgain)}
+              activeOpacity={0.7}
+            >
+              {dontAskAgain ? (
+                <CheckSquare size={20} color="#F6A623" />
+              ) : (
+                <Square size={20} color="#718096" />
+              )}
+              <Text style={styles.checkboxText}>
+                Do not ask me again (Disabled for testing)
+              </Text>
+            </TouchableOpacity>
+
+            <View style={{ gap: 12 }}>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: "#25D366",
+                  padding: 14,
+                  borderRadius: 10,
+                  alignItems: "center",
+                }}
+                onPress={() => finalizeJob(jobToComplete!, "whatsapp")}
+              >
+                <Text
+                  style={{ fontWeight: "700", color: "#0A0F1E", fontSize: 15 }}
+                >
+                  Send via WhatsApp
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={() => finalizeJob(jobToComplete!, "sms")}
+              >
+                <Text style={styles.primaryBtnText}>Send via SMS</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => finalizeJob(jobToComplete!, "none")}
+              >
+                <Text style={styles.secondaryBtnText}>
+                  No, just mark as done
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => {
+                  setConfirmModal(false);
+                  setDontAskAgain(false);
+                }}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -302,4 +439,70 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: "center", paddingVertical: 60 },
   emptyText: { fontSize: 16, fontWeight: "600", color: "#4A5568" },
   emptySubText: { fontSize: 13, color: "#2D3748", marginTop: 4 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: "#131929",
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: "#1E2A3D",
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#FFFFFF",
+    marginBottom: 12,
+  },
+  modalSubtitle: {
+    fontSize: 15,
+    color: "#A0AEC0",
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  checkboxRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 24,
+  },
+  checkboxText: {
+    marginLeft: 10,
+    fontSize: 14,
+    color: "#718096",
+  },
+  primaryBtn: {
+    backgroundColor: "#F6A623",
+    padding: 14,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  primaryBtnText: {
+    fontWeight: "700",
+    color: "#0A0F1E",
+    fontSize: 15,
+  },
+  secondaryBtn: {
+    backgroundColor: "#1E2A3D",
+    padding: 14,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  secondaryBtnText: {
+    fontWeight: "600",
+    color: "#FFFFFF",
+    fontSize: 15,
+  },
+  cancelBtn: {
+    padding: 14,
+    alignItems: "center",
+  },
+  cancelBtnText: {
+    fontWeight: "500",
+    color: "#718096",
+    fontSize: 15,
+  },
 });

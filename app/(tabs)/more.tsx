@@ -51,7 +51,7 @@ const menuItems: MenuItem[] = [
 export default function MoreScreen() {
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+      <StatusBar barStyle="light-content" backgroundColor="#0A0F1E" />
 
       <View style={styles.header}>
         <Text style={styles.headerTitle}>More</Text>
@@ -84,10 +84,10 @@ export default function MoreScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#ffffff" },
+  container: { flex: 1, backgroundColor: "#0A0F1E" },
   header: { paddingHorizontal: 24, paddingTop: 60, paddingBottom: 24 },
-  headerTitle: { fontSize: 28, fontWeight: "700", color: "#1a1a1a" },
-  headerSubtitle: { fontSize: 14, color: "#999999", marginTop: 4 },
+  headerTitle: { fontSize: 28, fontWeight: "700", color: "#FFFFFF" },
+  headerSubtitle: { fontSize: 14, color: "#718096", marginTop: 4 },
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -97,11 +97,11 @@ const styles = StyleSheet.create({
   },
   card: {
     width: "46%",
-    backgroundColor: "#f8f8f8",
+    backgroundColor: "#131929",
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: "#1E2A3D",
   },
   iconBox: {
     width: 52,
@@ -114,8 +114,8 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 15,
     fontWeight: "700",
-    color: "#1a1a1a",
+    color: "#FFFFFF",
     marginBottom: 4,
   },
-  cardSubtitle: { fontSize: 12, color: "#999999", lineHeight: 16 },
+  cardSubtitle: { fontSize: 12, color: "#718096", lineHeight: 16 },
 });

@@ -19,6 +19,9 @@ export default function SettingsScreen() {
   const [businessName, setBusinessName] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [phone, setPhone] = useState("");
+  const [completionMessage, setCompletionMessage] = useState(
+    "Hi {name}, your job is completed and ready!",
+  );
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState("");
@@ -38,6 +41,10 @@ export default function SettingsScreen() {
       setBusinessName(parsed.businessName || "");
       setOwnerName(parsed.ownerName || "");
       setPhone(parsed.phone || "");
+      setCompletionMessage(
+        parsed.completionMessage ||
+          "Hi {name}, your job is completed and ready!",
+      );
     }
     setLoading(false);
   };
@@ -46,7 +53,7 @@ export default function SettingsScreen() {
     setSaving(true);
     await AsyncStorage.setItem(
       "business_settings",
-      JSON.stringify({ businessName, ownerName, phone }),
+      JSON.stringify({ businessName, ownerName, phone, completionMessage }),
     );
     setSaving(false);
     Alert.alert("Saved", "Your settings have been updated.");
@@ -150,12 +157,24 @@ export default function SettingsScreen() {
           />
           <Text style={styles.label}>Phone Number</Text>
           <TextInput
-            style={[styles.input, { marginBottom: 0 }]}
+            style={styles.input}
             placeholder="e.g. 08012345678"
             placeholderTextColor="#4A5568"
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
+          />
+          <Text style={styles.label}>Completion Message Template</Text>
+          <Text style={styles.helperText}>
+            Use {"{name}"} to insert the customer's name.
+          </Text>
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            placeholder="Hi {name}, your job is ready!"
+            placeholderTextColor="#4A5568"
+            value={completionMessage}
+            onChangeText={setCompletionMessage}
+            multiline
           />
         </View>
 
@@ -265,6 +284,7 @@ const styles = StyleSheet.create({
     borderColor: "#1E2A3D",
   },
   label: { fontSize: 13, fontWeight: "500", color: "#A0AEC0", marginBottom: 6 },
+  helperText: { fontSize: 11, color: "#718096", marginBottom: 6 },
   input: {
     backgroundColor: "#0A0F1E",
     borderWidth: 1,
@@ -276,6 +296,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     marginBottom: 16,
   },
+  textArea: { height: 80, textAlignVertical: "top", marginBottom: 0 },
   saveButton: {
     backgroundColor: "#F6A623",
     borderRadius: 12,

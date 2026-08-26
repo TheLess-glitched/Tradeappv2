@@ -17,6 +17,7 @@ import { supabase } from "../constants/supabase";
 
 export default function NewJobScreen() {
   const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [service, setService] = useState("");
   const [price, setPrice] = useState("");
   const [date, setDate] = useState("");
@@ -39,27 +40,56 @@ export default function NewJobScreen() {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const { error } = await supabase.from("jobs").insert({
+    // 1. Insert the Job
+    const { error: jobError } = await supabase.from("jobs").insert({
       user_id: user?.id,
       customer_name: customerName,
       service,
-      price: parseInt(price),
+      price: parseInt(price.replace(/[^0-9]/g, ""), 10) || 0,
       date,
       time,
       notes,
       status: "pending",
     });
 
+    // 2. Format the phone number perfectly for WhatsApp and SMS
+    // Strips out any spaces, and removes the leading 0 if they typed it
+    let formattedPhone = "";
+    if (customerPhone) {
+      const cleanInput = customerPhone.replace(/\D/g, "").replace(/^0+/, "");
+      formattedPhone = `234${cleanInput}`;
+    }
+
+    // 3. Silently sync to Customers table
+    if (formattedPhone && !jobError) {
+      const { data: existingCustomer } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("user_id", user?.id)
+        .eq("phone", formattedPhone)
+        .single();
+
+      if (!existingCustomer) {
+        await supabase.from("customers").insert({
+          user_id: user?.id,
+          name: customerName,
+          phone: formattedPhone,
+          service_type: service,
+        });
+      }
+    }
+
     setLoading(false);
 
-    if (error) {
-      Alert.alert("Error", error.message);
+    if (jobError) {
+      Alert.alert("Error", jobError.message);
     } else {
       Alert.alert("Success", "Job saved!", [
         { text: "OK", onPress: () => router.back() },
       ]);
     }
   };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -94,10 +124,27 @@ export default function NewJobScreen() {
         </View>
 
         <View style={styles.fieldWrapper}>
+          <Text style={styles.label}>Customer Phone (Optional)</Text>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={[styles.input, styles.countryCodeBox]}>
+              <Text style={styles.countryCodeText}>+234</Text>
+            </View>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="801 234 5678"
+              placeholderTextColor="#4A5568"
+              value={customerPhone}
+              onChangeText={setCustomerPhone}
+              keyboardType="phone-pad"
+            />
+          </View>
+        </View>
+
+        <View style={styles.fieldWrapper}>
           <Text style={styles.label}>Service *</Text>
           <TextInput
             style={styles.input}
-            placeholder="e.g. Full car service, Hair braiding"
+            placeholder="e.g. Full car service"
             placeholderTextColor="#4A5568"
             value={service}
             onChangeText={setService}
@@ -177,10 +224,7 @@ export default function NewJobScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0A0F1E",
-  },
+  container: { flex: 1, backgroundColor: "#0A0F1E" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -189,31 +233,12 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingBottom: 16,
   },
-  backButton: {
-    width: 60,
-  },
-  backText: {
-    fontSize: 15,
-    color: "#F6A623",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  scroll: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  fieldWrapper: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: "500",
-    color: "#A0AEC0",
-    marginBottom: 8,
-  },
+  backButton: { width: 60 },
+  backText: { fontSize: 15, color: "#F6A623" },
+  headerTitle: { fontSize: 18, fontWeight: "700", color: "#FFFFFF" },
+  scroll: { paddingHorizontal: 20, paddingBottom: 40 },
+  fieldWrapper: { marginBottom: 20 },
+  label: { fontSize: 13, fontWeight: "500", color: "#A0AEC0", marginBottom: 8 },
   input: {
     backgroundColor: "#131929",
     borderWidth: 1,
@@ -224,13 +249,15 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#FFFFFF",
   },
-  textArea: {
-    height: 100,
-    textAlignVertical: "top",
+  countryCodeBox: {
+    paddingHorizontal: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#1E2A3D",
   },
-  row: {
-    flexDirection: "row",
-  },
+  countryCodeText: { color: "#A0AEC0", fontSize: 15, fontWeight: "700" },
+  textArea: { height: 100, textAlignVertical: "top" },
+  row: { flexDirection: "row" },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -249,11 +276,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F6A623",
     marginRight: 8,
   },
-  statusText: {
-    fontSize: 14,
-    color: "#F6A623",
-    fontWeight: "600",
-  },
+  statusText: { fontSize: 14, color: "#F6A623", fontWeight: "600" },
   saveButton: {
     backgroundColor: "#F6A623",
     borderRadius: 12,
@@ -261,12 +284,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 8,
   },
-  saveButtonDisabled: {
-    opacity: 0.7,
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#0A0F1E",
-  },
+  saveButtonDisabled: { opacity: 0.7 },
+  saveButtonText: { fontSize: 16, fontWeight: "700", color: "#0A0F1E" },
 });

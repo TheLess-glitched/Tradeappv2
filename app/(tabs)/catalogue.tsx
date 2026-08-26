@@ -233,7 +233,7 @@ export default function CatalogueScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+      <StatusBar barStyle="light-content" backgroundColor="#0A0F1E" />
 
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Catalogue</Text>
@@ -241,16 +241,16 @@ export default function CatalogueScreen() {
           style={styles.addButton}
           onPress={() => setModalVisible(true)}
         >
-          <Ionicons name="add" size={24} color="#ffffff" />
+          <Ionicons name="add" size={24} color="#0A0F1E" />
         </TouchableOpacity>
       </View>
 
       <View style={styles.searchBar}>
-        <Ionicons name="search-outline" size={18} color="#999" />
+        <Ionicons name="search-outline" size={18} color="#718096" />
         <TextInput
           style={styles.searchInput}
           placeholder="Search items..."
-          placeholderTextColor="#999"
+          placeholderTextColor="#718096"
           value={search}
           onChangeText={setSearch}
         />
@@ -262,7 +262,7 @@ export default function CatalogueScreen() {
         </View>
       ) : filtered.length === 0 ? (
         <View style={styles.empty}>
-          <Ionicons name="cube-outline" size={48} color="#cccccc" />
+          <Ionicons name="cube-outline" size={48} color="#4A5568" />
           <Text style={styles.emptyText}>No items yet</Text>
           <Text style={styles.emptySubtext}>Tap + to add your first item</Text>
         </View>
@@ -348,7 +348,7 @@ export default function CatalogueScreen() {
                     openEdit(item);
                   }}
                 >
-                  <Ionicons name="pencil-outline" size={16} color="#666" />
+                  <Ionicons name="pencil-outline" size={16} color="#A0AEC0" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.iconBtn}
@@ -357,7 +357,7 @@ export default function CatalogueScreen() {
                     handleDelete(item.id);
                   }}
                 >
-                  <Ionicons name="trash-outline" size={16} color="#E53E3E" />
+                  <Ionicons name="trash-outline" size={16} color="#FC8181" />
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
@@ -374,7 +374,7 @@ export default function CatalogueScreen() {
                 {editingItem ? "Edit Item" : "Add Item"}
               </Text>
               <TouchableOpacity onPress={resetForm}>
-                <Ionicons name="close" size={24} color="#1a1a1a" />
+                <Ionicons name="close" size={24} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -382,7 +382,7 @@ export default function CatalogueScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="e.g. Amoxicillin 500mg"
-                placeholderTextColor="#999"
+                placeholderTextColor="#718096"
                 value={name}
                 onChangeText={setName}
               />
@@ -422,7 +422,7 @@ export default function CatalogueScreen() {
                   <TextInput
                     style={styles.input}
                     placeholder="0"
-                    placeholderTextColor="#999"
+                    placeholderTextColor="#718096"
                     value={quantity}
                     onChangeText={setQuantity}
                     keyboardType="numeric"
@@ -433,7 +433,7 @@ export default function CatalogueScreen() {
                   <TextInput
                     style={styles.input}
                     placeholder="units"
-                    placeholderTextColor="#999"
+                    placeholderTextColor="#718096"
                     value={unit}
                     onChangeText={setUnit}
                   />
@@ -446,7 +446,7 @@ export default function CatalogueScreen() {
                   <TextInput
                     style={styles.input}
                     placeholder="0"
-                    placeholderTextColor="#999"
+                    placeholderTextColor="#718096"
                     value={costPrice}
                     onChangeText={setCostPrice}
                     keyboardType="numeric"
@@ -457,7 +457,7 @@ export default function CatalogueScreen() {
                   <TextInput
                     style={styles.input}
                     placeholder="0"
-                    placeholderTextColor="#999"
+                    placeholderTextColor="#718096"
                     value={sellingPrice}
                     onChangeText={setSellingPrice}
                     keyboardType="numeric"
@@ -469,7 +469,7 @@ export default function CatalogueScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Alert when stock falls below this"
-                placeholderTextColor="#999"
+                placeholderTextColor="#718096"
                 value={reorderLevel}
                 onChangeText={setReorderLevel}
                 keyboardType="numeric"
@@ -479,7 +479,7 @@ export default function CatalogueScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Supplier name"
-                placeholderTextColor="#999"
+                placeholderTextColor="#718096"
                 value={supplier}
                 onChangeText={setSupplier}
               />
@@ -488,7 +488,7 @@ export default function CatalogueScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="e.g. Shelf A, Store Room"
-                placeholderTextColor="#999"
+                placeholderTextColor="#718096"
                 value={location}
                 onChangeText={setLocation}
               />
@@ -519,7 +519,7 @@ export default function CatalogueScreen() {
                   setMovementReason("");
                 }}
               >
-                <Ionicons name="close" size={24} color="#1a1a1a" />
+                <Ionicons name="close" size={24} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
 
@@ -562,7 +562,7 @@ export default function CatalogueScreen() {
             <TextInput
               style={styles.input}
               placeholder="How many?"
-              placeholderTextColor="#999"
+              placeholderTextColor="#718096"
               value={movementQty}
               onChangeText={setMovementQty}
               keyboardType="numeric"
@@ -572,7 +572,7 @@ export default function CatalogueScreen() {
             <TextInput
               style={styles.input}
               placeholder="e.g. Sold to customer, New delivery"
-              placeholderTextColor="#999"
+              placeholderTextColor="#718096"
               value={movementReason}
               onChangeText={setMovementReason}
             />
@@ -582,7 +582,7 @@ export default function CatalogueScreen() {
                 styles.saveButton,
                 {
                   backgroundColor:
-                    movementType === "in" ? "#00A86B" : "#E53E3E",
+                    movementType === "in" ? "#F6A623" : "#E53E3E",
                 },
               ]}
               onPress={handleMovement}
@@ -599,7 +599,7 @@ export default function CatalogueScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#ffffff" },
+  container: { flex: 1, backgroundColor: "#0A0F1E" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -608,38 +608,40 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 16,
   },
-  headerTitle: { fontSize: 28, fontWeight: "700", color: "#1a1a1a" },
+  headerTitle: { fontSize: 28, fontWeight: "700", color: "#FFFFFF" },
   addButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#00A86B",
+    backgroundColor: "#F6A623",
     alignItems: "center",
     justifyContent: "center",
   },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#131929",
     borderRadius: 12,
     marginHorizontal: 20,
     marginBottom: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#1E2A3D",
   },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: 14, color: "#1a1a1a" },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 14, color: "#FFFFFF" },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
-  emptyText: { fontSize: 16, fontWeight: "600", color: "#999999" },
-  emptySubtext: { fontSize: 13, color: "#cccccc" },
+  emptyText: { fontSize: 16, fontWeight: "600", color: "#718096" },
+  emptySubtext: { fontSize: 13, color: "#4A5568" },
   list: { padding: 20, gap: 12 },
   itemCard: {
-    backgroundColor: "#f8f8f8",
+    backgroundColor: "#131929",
     borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: "#1E2A3D",
   },
-  itemCardLow: { borderColor: "#FEB2B2", backgroundColor: "#FFF5F5" },
+  itemCardLow: { borderColor: "#FC8181", backgroundColor: "#2D1B00" },
   itemTop: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -647,15 +649,15 @@ const styles = StyleSheet.create({
   },
   itemLeft: { flex: 1 },
   itemRight: { alignItems: "flex-end" },
-  itemName: { fontSize: 15, fontWeight: "700", color: "#1a1a1a" },
-  itemCategory: { fontSize: 12, color: "#999999", marginTop: 2 },
-  itemQty: { fontSize: 16, fontWeight: "700", color: "#00A86B" },
-  itemQtyLow: { color: "#E53E3E" },
+  itemName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
+  itemCategory: { fontSize: 12, color: "#718096", marginTop: 2 },
+  itemQty: { fontSize: 16, fontWeight: "700", color: "#F6A623" },
+  itemQtyLow: { color: "#FC8181" },
   lowStockBadge: {
     fontSize: 10,
     fontWeight: "600",
-    color: "#E53E3E",
-    backgroundColor: "#FEB2B222",
+    color: "#FC8181",
+    backgroundColor: "#FC818122",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -667,29 +669,29 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 12,
   },
-  metaText: { fontSize: 12, color: "#666666" },
+  metaText: { fontSize: 12, color: "#A0AEC0" },
   itemActions: { flexDirection: "row", gap: 8, alignItems: "center" },
   actionBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  inBtn: { backgroundColor: "#00A86B22" },
+  inBtn: { backgroundColor: "#F6A62322" },
   outBtn: { backgroundColor: "#E53E3E22" },
-  inBtnText: { fontSize: 12, fontWeight: "600", color: "#00A86B" },
-  outBtnText: { fontSize: 12, fontWeight: "600", color: "#E53E3E" },
+  inBtnText: { fontSize: 12, fontWeight: "600", color: "#F6A623" },
+  outBtnText: { fontSize: 12, fontWeight: "600", color: "#FC8181" },
   iconBtn: {
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: "#f0f0f0",
+    backgroundColor: "#1E2A3D",
     alignItems: "center",
     justifyContent: "center",
     marginLeft: "auto",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "flex-end",
   },
   modalContent: {
-    backgroundColor: "#ffffff",
+    backgroundColor: "#0F1923",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
@@ -704,19 +706,21 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#1a1a1a",
+    color: "#FFFFFF",
     flex: 1,
     marginRight: 8,
   },
-  label: { fontSize: 13, fontWeight: "600", color: "#666666", marginBottom: 6 },
+  label: { fontSize: 13, fontWeight: "600", color: "#A0AEC0", marginBottom: 6 },
   input: {
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#131929",
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
-    color: "#1a1a1a",
+    color: "#FFFFFF",
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#1E2A3D",
   },
   row: { flexDirection: "row", gap: 12 },
   rowItem: { flex: 1 },
@@ -724,33 +728,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#131929",
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: "#1E2A3D",
   },
-  chipActive: { backgroundColor: "#00A86B", borderColor: "#00A86B" },
-  chipText: { fontSize: 13, fontWeight: "500", color: "#666666" },
-  chipTextActive: { color: "#ffffff" },
+  chipActive: { backgroundColor: "#F6A623", borderColor: "#F6A623" },
+  chipText: { fontSize: 13, fontWeight: "500", color: "#A0AEC0" },
+  chipTextActive: { color: "#0A0F1E" },
   saveButton: {
-    backgroundColor: "#00A86B",
+    backgroundColor: "#F6A623",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
     marginTop: 8,
   },
-  saveButtonText: { fontSize: 16, fontWeight: "700", color: "#ffffff" },
+  saveButtonText: { fontSize: 16, fontWeight: "700", color: "#0A0F1E" },
   movementToggle: { flexDirection: "row", gap: 12, marginBottom: 16 },
   toggleBtn: {
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: "center",
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#131929",
     borderWidth: 1,
-    borderColor: "#eeeeee",
+    borderColor: "#1E2A3D",
   },
-  toggleBtnActiveIn: { backgroundColor: "#00A86B22", borderColor: "#00A86B" },
+  toggleBtnActiveIn: { backgroundColor: "#F6A62322", borderColor: "#F6A623" },
   toggleBtnActiveOut: { backgroundColor: "#E53E3E22", borderColor: "#E53E3E" },
-  toggleBtnText: { fontSize: 14, fontWeight: "600", color: "#666666" },
-  toggleBtnTextActive: { color: "#1a1a1a" },
+  toggleBtnText: { fontSize: 14, fontWeight: "600", color: "#A0AEC0" },
+  toggleBtnTextActive: { color: "#FFFFFF" },
 });
