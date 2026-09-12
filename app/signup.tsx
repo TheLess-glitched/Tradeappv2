@@ -1,20 +1,22 @@
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../constants/supabase";
+import { useTheme } from "../context/theme-context";
 
 export default function SignupScreen() {
+  const { colors } = useTheme();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -46,7 +48,7 @@ export default function SignupScreen() {
       Alert.alert("Signup failed", error.message);
     } else {
       Alert.alert(
-        "Check your email 📧",
+        "Check your email",
         "We sent a confirmation link to " +
           email +
           ". Tap the link to verify your account, then come back to sign in.",
@@ -57,28 +59,35 @@ export default function SignupScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#0A0F1E" />
-
       <View style={styles.brandSection}>
-        <View style={styles.logoBox}>
-          <Text style={styles.logoText}>T</Text>
+        <View style={[styles.logoBox, { backgroundColor: colors.primary }]}>
+          <Text style={[styles.logoText, { color: colors.primaryText }]}>T</Text>
         </View>
-        <Text style={styles.appName}>TradeApp</Text>
-        <Text style={styles.tagline}>Run your business. Your way.</Text>
+        <Text style={[styles.appName, { color: colors.text }]}>TradeApp</Text>
+        <Text style={[styles.tagline, { color: colors.textMuted }]}>
+          Run your business. Your way.
+        </Text>
       </View>
 
       <View style={styles.formSection}>
-        <Text style={styles.welcomeText}>Create account</Text>
+        <Text style={[styles.welcomeText, { color: colors.text }]}>Create account</Text>
 
         <View style={styles.inputWrapper}>
-          <Text style={styles.inputLabel}>Email</Text>
+          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Email</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="you@business.com"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -87,11 +96,18 @@ export default function SignupScreen() {
         </View>
 
         <View style={styles.inputWrapper}>
-          <Text style={styles.inputLabel}>Password</Text>
+          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Password</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="••••••••"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -99,11 +115,20 @@ export default function SignupScreen() {
         </View>
 
         <View style={styles.inputWrapper}>
-          <Text style={styles.inputLabel}>Confirm Password</Text>
+          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
+            Confirm Password
+          </Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="••••••••"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry
@@ -111,21 +136,31 @@ export default function SignupScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.signupButton, loading && styles.buttonDisabled]}
+          style={[
+            styles.signupButton,
+            { backgroundColor: colors.primary },
+            loading && styles.buttonDisabled,
+          ]}
           onPress={handleSignup}
           disabled={loading}
+          activeOpacity={0.85}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
           {loading ? (
-            <ActivityIndicator color="#0A0F1E" />
+            <ActivityIndicator color={colors.primaryText} />
           ) : (
-            <Text style={styles.signupButtonText}>Create Account</Text>
+            <Text style={[styles.signupButtonText, { color: colors.primaryText }]}>
+              Create Account
+            </Text>
           )}
         </TouchableOpacity>
 
         <View style={styles.loginRow}>
-          <Text style={styles.loginPrompt}>Already have an account? </Text>
+          <Text style={[styles.loginPrompt, { color: colors.textMuted }]}>
+            Already have an account?{" "}
+          </Text>
           <TouchableOpacity onPress={() => router.replace("/")}>
-            <Text style={styles.loginLink}>Sign in</Text>
+            <Text style={[styles.loginLink, { color: colors.primary }]}>Sign in</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -136,7 +171,6 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0A0F1E",
     paddingHorizontal: 24,
     justifyContent: "center",
   },
@@ -148,7 +182,6 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: "#F6A623",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
@@ -156,17 +189,14 @@ const styles = StyleSheet.create({
   logoText: {
     fontSize: 32,
     fontWeight: "800",
-    color: "#0A0F1E",
   },
   appName: {
     fontSize: 28,
     fontWeight: "700",
-    color: "#FFFFFF",
     letterSpacing: 0.5,
   },
   tagline: {
     fontSize: 14,
-    color: "#718096",
     marginTop: 4,
   },
   formSection: {
@@ -175,7 +205,6 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 22,
     fontWeight: "600",
-    color: "#FFFFFF",
     marginBottom: 24,
   },
   inputWrapper: {
@@ -184,21 +213,16 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 13,
     fontWeight: "500",
-    color: "#A0AEC0",
     marginBottom: 6,
   },
   input: {
-    backgroundColor: "#131929",
     borderWidth: 1,
-    borderColor: "#1E2A3D",
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
-    color: "#FFFFFF",
   },
   signupButton: {
-    backgroundColor: "#F6A623",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
@@ -211,7 +235,6 @@ const styles = StyleSheet.create({
   signupButtonText: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#0A0F1E",
   },
   loginRow: {
     flexDirection: "row",
@@ -219,11 +242,9 @@ const styles = StyleSheet.create({
   },
   loginPrompt: {
     fontSize: 14,
-    color: "#718096",
   },
   loginLink: {
     fontSize: 14,
-    color: "#F6A623",
     fontWeight: "600",
   },
 });

@@ -1,38 +1,43 @@
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../constants/supabase";
+import { useAuth } from "../context/auth-context";
+import { useTheme } from "../context/theme-context";
 
 export default function LoginScreen() {
+  const { colors, isPinUnlocked } = useTheme();
+  const { session, isSessionReady } = useAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    checkSession();
-  }, []);
+    if (!isSessionReady) {
+      return;
+    }
 
-  const checkSession = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
     if (session) {
-      router.replace("/pin" as any);
+      if (isPinUnlocked) {
+        router.replace("/(tabs)/home" as any);
+      } else {
+        router.replace("/pin" as any);
+      }
     } else {
       setLoading(false);
     }
-  };
+  }, [isSessionReady, session, isPinUnlocked]);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -54,36 +59,47 @@ export default function LoginScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#F6A623" />
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingShell}>
+          <View style={[styles.loadingLogo, { backgroundColor: colors.primary }]} />
+          <View style={[styles.loadingLine, { backgroundColor: colors.border, width: 160 }]} />
+          <View style={[styles.loadingLine, { backgroundColor: colors.border, width: 120 }]} />
+        </View>
       </View>
     );
   }
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#0A0F1E" />
-
       <View style={styles.brandSection}>
-        <View style={styles.logoBox}>
-          <Text style={styles.logoText}>T</Text>
+        <View style={[styles.logoBox, { backgroundColor: colors.primary }]}>
+          <Text style={[styles.logoText, { color: colors.primaryText }]}>T</Text>
         </View>
-        <Text style={styles.appName}>TradeApp</Text>
-        <Text style={styles.tagline}>Run your business. Your way.</Text>
+        <Text style={[styles.appName, { color: colors.text }]}>TradeApp</Text>
+        <Text style={[styles.tagline, { color: colors.textMuted }]}>
+          Run your business. Your way.
+        </Text>
       </View>
 
       <View style={styles.formSection}>
-        <Text style={styles.welcomeText}>Welcome back</Text>
+        <Text style={[styles.welcomeText, { color: colors.text }]}>Welcome back</Text>
 
         <View style={styles.inputWrapper}>
-          <Text style={styles.inputLabel}>Email</Text>
+          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Email</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="you@business.com"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -92,11 +108,18 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.inputWrapper}>
-          <Text style={styles.inputLabel}>Password</Text>
+          <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Password</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="••••••••"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -104,25 +127,37 @@ export default function LoginScreen() {
         </View>
 
         <TouchableOpacity style={styles.forgotPassword}>
-          <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+          <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
+            Forgot password?
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+          style={[
+            styles.loginButton,
+            { backgroundColor: colors.primary },
+            loading && styles.loginButtonDisabled,
+          ]}
           onPress={handleLogin}
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#0A0F1E" />
+            <ActivityIndicator color={colors.primaryText} />
           ) : (
-            <Text style={styles.loginButtonText}>Sign In</Text>
+            <Text style={[styles.loginButtonText, { color: colors.primaryText }]}>
+              Sign In
+            </Text>
           )}
         </TouchableOpacity>
 
         <View style={styles.signupRow}>
-          <Text style={styles.signupPrompt}>New to TradeApp? </Text>
+          <Text style={[styles.signupPrompt, { color: colors.textMuted }]}>
+            New to TradeApp?{" "}
+          </Text>
           <TouchableOpacity onPress={() => router.push("/signup" as any)}>
-            <Text style={styles.signupLink}>Create account</Text>
+            <Text style={[styles.signupLink, { color: colors.primary }]}>
+              Create account
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -133,13 +168,24 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: "#0A0F1E",
     alignItems: "center",
     justifyContent: "center",
   },
+  loadingShell: {
+    alignItems: "center",
+    gap: 12,
+  },
+  loadingLogo: {
+    width: 64,
+    height: 64,
+    borderRadius: 18,
+  },
+  loadingLine: {
+    height: 12,
+    borderRadius: 6,
+  },
   container: {
     flex: 1,
-    backgroundColor: "#0A0F1E",
     paddingHorizontal: 24,
     justifyContent: "center",
   },
@@ -151,7 +197,6 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: "#F6A623",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 12,
@@ -159,17 +204,14 @@ const styles = StyleSheet.create({
   logoText: {
     fontSize: 32,
     fontWeight: "800",
-    color: "#0A0F1E",
   },
   appName: {
     fontSize: 28,
     fontWeight: "700",
-    color: "#FFFFFF",
     letterSpacing: 0.5,
   },
   tagline: {
     fontSize: 14,
-    color: "#718096",
     marginTop: 4,
   },
   formSection: {
@@ -178,7 +220,6 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 22,
     fontWeight: "600",
-    color: "#FFFFFF",
     marginBottom: 24,
   },
   inputWrapper: {
@@ -187,18 +228,14 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 13,
     fontWeight: "500",
-    color: "#A0AEC0",
     marginBottom: 6,
   },
   input: {
-    backgroundColor: "#131929",
     borderWidth: 1,
-    borderColor: "#1E2A3D",
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
-    color: "#FFFFFF",
   },
   forgotPassword: {
     alignSelf: "flex-end",
@@ -207,10 +244,8 @@ const styles = StyleSheet.create({
   },
   forgotPasswordText: {
     fontSize: 13,
-    color: "#F6A623",
   },
   loginButton: {
-    backgroundColor: "#F6A623",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
@@ -222,7 +257,6 @@ const styles = StyleSheet.create({
   loginButtonText: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#0A0F1E",
   },
   signupRow: {
     flexDirection: "row",
@@ -230,11 +264,9 @@ const styles = StyleSheet.create({
   },
   signupPrompt: {
     fontSize: 14,
-    color: "#718096",
   },
   signupLink: {
     fontSize: 14,
-    color: "#F6A623",
     fontWeight: "600",
   },
 });

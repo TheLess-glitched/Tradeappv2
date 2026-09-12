@@ -1,19 +1,29 @@
-import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { router, useFocusEffect } from "expo-router";
 import {
-  Alert,
-  FlatList,
-  Modal,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    MapPin,
+    Package,
+    Pencil,
+    Plus,
+    Search,
+    Trash2,
+    X,
+} from "lucide-react-native";
+import React, { useCallback, useRef, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
+import { CURRENCIES, formatCurrency } from "../../constants/currency";
 import { supabase } from "../../constants/supabase";
+import { useTheme } from "../../context/theme-context";
 
 type CatalogueItem = {
   id: string;
@@ -24,13 +34,17 @@ type CatalogueItem = {
   cost_price: number;
   selling_price: number;
   reorder_level: number;
+  track_stock: boolean;
   supplier: string;
   location: string;
 };
 
 export default function CatalogueScreen() {
+  const { colors, currency } = useTheme();
+
   const [items, setItems] = useState<CatalogueItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const hasDataRef = useRef(false);
   const [search, setSearch] = useState("");
   const [modalVisible, setModalVisible] = useState(false);
   const [movementModal, setMovementModal] = useState(false);
@@ -44,6 +58,7 @@ export default function CatalogueScreen() {
   const [costPrice, setCostPrice] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
   const [reorderLevel, setReorderLevel] = useState("");
+  const [trackStock, setTrackStock] = useState(false);
   const [supplier, setSupplier] = useState("");
   const [location, setLocation] = useState("");
 
@@ -60,12 +75,11 @@ export default function CatalogueScreen() {
     "Consumables",
   ];
 
-  useEffect(() => {
-    fetchItems();
-  }, []);
+  const fetchItems = useCallback(async () => {
+    if (!hasDataRef.current) {
+      setLoading(true);
+    }
 
-  const fetchItems = async () => {
-    setLoading(true);
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -74,9 +88,18 @@ export default function CatalogueScreen() {
       .select("*")
       .eq("user_id", user?.id)
       .order("created_at", { ascending: false });
-    if (!error && data) setItems(data);
+    if (!error && data) {
+      setItems(data);
+      hasDataRef.current = data.length > 0;
+    }
     setLoading(false);
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchItems();
+    }, [fetchItems]),
+  );
 
   const handleSave = async () => {
     if (!name.trim() || !quantity) {
@@ -98,6 +121,7 @@ export default function CatalogueScreen() {
           cost_price: costPrice ? parseFloat(costPrice) : null,
           selling_price: sellingPrice ? parseFloat(sellingPrice) : null,
           reorder_level: reorderLevel ? parseFloat(reorderLevel) : 0,
+          track_stock: trackStock,
           supplier,
           location,
           updated_at: new Date().toISOString(),
@@ -117,6 +141,7 @@ export default function CatalogueScreen() {
         cost_price: costPrice ? parseFloat(costPrice) : null,
         selling_price: sellingPrice ? parseFloat(sellingPrice) : null,
         reorder_level: reorderLevel ? parseFloat(reorderLevel) : 0,
+        track_stock: trackStock,
         supplier,
         location,
       });
@@ -170,12 +195,11 @@ export default function CatalogueScreen() {
     setMovementModal(false);
     setMovementQty("");
     setMovementReason("");
-    setSelectedItem(null);
     fetchItems();
   };
 
   const handleDelete = (id: string) => {
-    Alert.alert("Delete Item", "Are you sure? This cannot be undone.", [
+    Alert.alert("Delete Item", "Are you sure you want to delete this item?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -192,11 +216,12 @@ export default function CatalogueScreen() {
     setEditingItem(item);
     setName(item.name);
     setCategory(item.category);
-    setQuantity(String(item.quantity));
+    setQuantity(item.quantity.toString());
     setUnit(item.unit);
-    setCostPrice(item.cost_price ? String(item.cost_price) : "");
-    setSellingPrice(item.selling_price ? String(item.selling_price) : "");
-    setReorderLevel(item.reorder_level ? String(item.reorder_level) : "");
+    setCostPrice(item.cost_price ? item.cost_price.toString() : "");
+    setSellingPrice(item.selling_price ? item.selling_price.toString() : "");
+    setReorderLevel(item.reorder_level ? item.reorder_level.toString() : "");
+    setTrackStock(item.track_stock ?? false);
     setSupplier(item.supplier || "");
     setLocation(item.location || "");
     setModalVisible(true);
@@ -204,10 +229,13 @@ export default function CatalogueScreen() {
 
   const openMovement = (item: CatalogueItem) => {
     setSelectedItem(item);
+    setMovementQty("");
+    setMovementReason("");
     setMovementModal(true);
   };
 
   const resetForm = () => {
+    setEditingItem(null);
     setName("");
     setCategory("General");
     setQuantity("");
@@ -215,86 +243,130 @@ export default function CatalogueScreen() {
     setCostPrice("");
     setSellingPrice("");
     setReorderLevel("");
+    setTrackStock(false);
     setSupplier("");
     setLocation("");
-    setEditingItem(null);
     setModalVisible(false);
   };
-
-  const filtered = items.filter(
-    (i) =>
-      i.name.toLowerCase().includes(search.toLowerCase()) ||
-      i.category.toLowerCase().includes(search.toLowerCase()) ||
-      i.supplier?.toLowerCase().includes(search.toLowerCase()),
-  );
 
   const isLowStock = (item: CatalogueItem) =>
     item.reorder_level > 0 && item.quantity <= item.reorder_level;
 
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0F1E" />
+  const filteredItems = items.filter(
+    (item) =>
+      item.name.toLowerCase().includes(search.toLowerCase()) ||
+      item.category.toLowerCase().includes(search.toLowerCase()) ||
+      (item.supplier &&
+        item.supplier.toLowerCase().includes(search.toLowerCase())) ||
+      (item.location &&
+        item.location.toLowerCase().includes(search.toLowerCase())),
+  );
 
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Catalogue</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Catalogue</Text>
         <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => setModalVisible(true)}
+          style={[styles.addButton, { backgroundColor: colors.primary }]}
+          onPress={() => {
+            resetForm();
+            setModalVisible(true);
+          }}
         >
-          <Ionicons name="add" size={24} color="#0A0F1E" />
+          <Plus size={22} color={colors.primaryText} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.searchBar}>
-        <Ionicons name="search-outline" size={18} color="#718096" />
+      <View
+        style={[
+          styles.searchBar,
+          {
+            backgroundColor: colors.surface,
+            borderColor: colors.border,
+          },
+        ]}
+      >
+        <Search size={18} color={colors.textMuted} />
         <TextInput
-          style={styles.searchInput}
-          placeholder="Search items..."
-          placeholderTextColor="#718096"
+          style={[styles.searchInput, { color: colors.inputText }]}
+          placeholder="Search catalogue by name, category..."
+          placeholderTextColor={colors.placeholder}
           value={search}
           onChangeText={setSearch}
         />
+        {search ? (
+          <TouchableOpacity onPress={() => setSearch("")}>
+            <X size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {loading ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+      ) : filteredItems.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyText}>Loading...</Text>
-        </View>
-      ) : filtered.length === 0 ? (
-        <View style={styles.empty}>
-          <Ionicons name="cube-outline" size={48} color="#4A5568" />
-          <Text style={styles.emptyText}>No items yet</Text>
-          <Text style={styles.emptySubtext}>Tap + to add your first item</Text>
+          <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+            {search ? "No matching items found" : "No items in catalogue yet"}
+          </Text>
+          <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>
+            Tap + to add your first item
+          </Text>
         </View>
       ) : (
         <FlatList
-          data={filtered}
+          data={filteredItems}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
             <TouchableOpacity
-              style={[styles.itemCard, isLowStock(item) && styles.itemCardLow]}
+              style={[
+                styles.itemCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+                isLowStock(item) && {
+                  borderColor: colors.danger,
+                  backgroundColor: colors.dangerSurface,
+                },
+              ]}
               onPress={() =>
-                router.push(`/catalogue-detail?id=${item.id}` as any)
+                router.push({
+                  pathname: "/catalogue-detail",
+                  params: { id: item.id },
+                })
               }
               activeOpacity={0.8}
             >
               <View style={styles.itemTop}>
                 <View style={styles.itemLeft}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemCategory}>{item.category}</Text>
+                  <Text style={[styles.itemName, { color: colors.text }]}>{item.name}</Text>
+                  <Text style={[styles.itemCategory, { color: colors.textSecondary }]}>
+                    {item.category}
+                  </Text>
                 </View>
                 <View style={styles.itemRight}>
                   <Text
                     style={[
                       styles.itemQty,
-                      isLowStock(item) && styles.itemQtyLow,
+                      { color: colors.primary },
+                      isLowStock(item) && { color: colors.danger },
                     ]}
                   >
                     {item.quantity} {item.unit}
                   </Text>
                   {isLowStock(item) && (
-                    <Text style={styles.lowStockBadge}>Low Stock</Text>
+                    <Text
+                      style={[
+                        styles.lowStockBadge,
+                        {
+                          color: colors.dangerText,
+                          backgroundColor: colors.dangerSurface,
+                        },
+                      ]}
+                    >
+                      Low Stock
+                    </Text>
                   )}
                 </View>
               </View>
@@ -302,62 +374,82 @@ export default function CatalogueScreen() {
               {item.cost_price || item.supplier || item.location ? (
                 <View style={styles.itemMeta}>
                   {item.cost_price ? (
-                    <Text style={styles.metaText}>
-                      Cost: ₦{item.cost_price.toLocaleString()}
+                    <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                      Cost: {formatCurrency(item.cost_price || 0, currency)}
                     </Text>
                   ) : null}
                   {item.selling_price ? (
-                    <Text style={styles.metaText}>
-                      Sell: ₦{item.selling_price.toLocaleString()}
+                    <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                      Sell: {formatCurrency(item.selling_price || 0, currency)}
                     </Text>
                   ) : null}
                   {item.supplier ? (
-                    <Text style={styles.metaText}>📦 {item.supplier}</Text>
+                    <View style={styles.metaRow}>
+                      <Package size={12} color={colors.textMuted} />
+                      <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                        {item.supplier}
+                      </Text>
+                    </View>
                   ) : null}
                   {item.location ? (
-                    <Text style={styles.metaText}>📍 {item.location}</Text>
+                    <View style={styles.metaRow}>
+                      <MapPin size={12} color={colors.textMuted} />
+                      <Text style={[styles.metaText, { color: colors.textSecondary }]}>
+                        {item.location}
+                      </Text>
+                    </View>
                   ) : null}
                 </View>
               ) : null}
 
               <View style={styles.itemActions}>
                 <TouchableOpacity
-                  style={[styles.actionBtn, styles.inBtn]}
+                  style={[
+                    styles.actionBtn,
+                    { backgroundColor: colors.secondarySurface },
+                  ]}
                   onPress={(e) => {
                     e.stopPropagation?.();
                     setMovementType("in");
                     openMovement(item);
                   }}
                 >
-                  <Text style={styles.inBtnText}>+ Stock In</Text>
+                  <Text style={[styles.inBtnText, { color: colors.primary }]}>
+                    + Stock In
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.actionBtn, styles.outBtn]}
+                  style={[
+                    styles.actionBtn,
+                    { backgroundColor: colors.dangerSurface },
+                  ]}
                   onPress={(e) => {
                     e.stopPropagation?.();
                     setMovementType("out");
                     openMovement(item);
                   }}
                 >
-                  <Text style={styles.outBtnText}>- Stock Out</Text>
+                  <Text style={[styles.outBtnText, { color: colors.danger }]}>
+                    - Stock Out
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.iconBtn}
+                  style={[styles.iconBtn, { backgroundColor: colors.surfaceSubtle }]}
                   onPress={(e) => {
                     e.stopPropagation?.();
                     openEdit(item);
                   }}
                 >
-                  <Ionicons name="pencil-outline" size={16} color="#A0AEC0" />
+                  <Pencil size={15} color={colors.textSecondary} />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.iconBtn}
+                  style={[styles.iconBtn, { backgroundColor: colors.dangerSurface }]}
                   onPress={(e) => {
                     e.stopPropagation?.();
                     handleDelete(item.id);
                   }}
                 >
-                  <Ionicons name="trash-outline" size={16} color="#FC8181" />
+                  <Trash2 size={15} color={colors.danger} />
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
@@ -367,73 +459,117 @@ export default function CatalogueScreen() {
 
       {/* Add/Edit Modal */}
       <Modal visible={modalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+          <View
+            style={[
+              styles.modalContent,
+              {
+                backgroundColor: colors.modalBackground,
+                borderColor: colors.modalBorder,
+              },
+            ]}
+          >
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {editingItem ? "Edit Item" : "Add Item"}
               </Text>
               <TouchableOpacity onPress={resetForm}>
-                <Ionicons name="close" size={24} color="#FFFFFF" />
+                <X size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.label}>Name *</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Name *</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                    color: colors.inputText,
+                  },
+                ]}
                 placeholder="e.g. Amoxicillin 500mg"
-                placeholderTextColor="#718096"
+                placeholderTextColor={colors.placeholder}
                 value={name}
                 onChangeText={setName}
               />
 
-              <Text style={styles.label}>Category</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Category</Text>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={{ marginBottom: 16 }}
               >
                 <View style={{ flexDirection: "row", gap: 8 }}>
-                  {categories.map((cat) => (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[
-                        styles.chip,
-                        category === cat && styles.chipActive,
-                      ]}
-                      onPress={() => setCategory(cat)}
-                    >
-                      <Text
+                  {categories.map((cat) => {
+                    const isSelected = category === cat;
+                    return (
+                      <TouchableOpacity
+                        key={cat}
                         style={[
-                          styles.chipText,
-                          category === cat && styles.chipTextActive,
+                          styles.chip,
+                          {
+                            backgroundColor: isSelected
+                              ? colors.primary
+                              : colors.chipBackground,
+                            borderColor: isSelected
+                              ? colors.primary
+                              : colors.chipBorder,
+                          },
                         ]}
+                        onPress={() => setCategory(cat)}
                       >
-                        {cat}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
+                        <Text
+                          style={[
+                            styles.chipText,
+                            {
+                              color: isSelected
+                                ? colors.primaryText
+                                : colors.chipText,
+                              fontWeight: isSelected ? "700" : "500",
+                            },
+                          ]}
+                        >
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </ScrollView>
 
               <View style={styles.row}>
                 <View style={styles.rowItem}>
-                  <Text style={styles.label}>Quantity *</Text>
+                  <Text style={[styles.label, { color: colors.textSecondary }]}>Quantity *</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                        color: colors.inputText,
+                      },
+                    ]}
                     placeholder="0"
-                    placeholderTextColor="#718096"
+                    placeholderTextColor={colors.placeholder}
                     value={quantity}
                     onChangeText={setQuantity}
                     keyboardType="numeric"
                   />
                 </View>
                 <View style={styles.rowItem}>
-                  <Text style={styles.label}>Unit</Text>
+                  <Text style={[styles.label, { color: colors.textSecondary }]}>Unit</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                        color: colors.inputText,
+                      },
+                    ]}
                     placeholder="units"
-                    placeholderTextColor="#718096"
+                    placeholderTextColor={colors.placeholder}
                     value={unit}
                     onChangeText={setUnit}
                   />
@@ -442,22 +578,36 @@ export default function CatalogueScreen() {
 
               <View style={styles.row}>
                 <View style={styles.rowItem}>
-                  <Text style={styles.label}>Cost Price (₦)</Text>
+                  <Text style={[styles.label, { color: colors.textSecondary }]}>Cost Price ({CURRENCIES[currency].symbol})</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                        color: colors.inputText,
+                      },
+                    ]}
                     placeholder="0"
-                    placeholderTextColor="#718096"
+                    placeholderTextColor={colors.placeholder}
                     value={costPrice}
                     onChangeText={setCostPrice}
                     keyboardType="numeric"
                   />
                 </View>
                 <View style={styles.rowItem}>
-                  <Text style={styles.label}>Selling Price (₦)</Text>
+                  <Text style={[styles.label, { color: colors.textSecondary }]}>Selling Price ({CURRENCIES[currency].symbol})</Text>
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      {
+                        backgroundColor: colors.inputBackground,
+                        borderColor: colors.inputBorder,
+                        color: colors.inputText,
+                      },
+                    ]}
                     placeholder="0"
-                    placeholderTextColor="#718096"
+                    placeholderTextColor={colors.placeholder}
                     value={sellingPrice}
                     onChangeText={setSellingPrice}
                     keyboardType="numeric"
@@ -465,36 +615,83 @@ export default function CatalogueScreen() {
                 </View>
               </View>
 
-              <Text style={styles.label}>Reorder Level</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Reorder Level</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                    color: colors.inputText,
+                  },
+                ]}
                 placeholder="Alert when stock falls below this"
-                placeholderTextColor="#718096"
+                placeholderTextColor={colors.placeholder}
                 value={reorderLevel}
                 onChangeText={setReorderLevel}
                 keyboardType="numeric"
               />
 
-              <Text style={styles.label}>Supplier</Text>
+              <TouchableOpacity
+                style={styles.trackStockRow}
+                onPress={() => setTrackStock((current) => !current)}
+                activeOpacity={0.7}
+              >
+                <View
+                  style={[
+                    styles.trackStockCheckbox,
+                    {
+                      backgroundColor: trackStock
+                        ? colors.primary
+                        : colors.inputBackground,
+                      borderColor: trackStock
+                        ? colors.primary
+                        : colors.inputBorder,
+                    },
+                  ]}
+                >
+                  {trackStock ? <Text style={{ color: colors.primaryText }}>✓</Text> : null}
+                </View>
+                <Text style={[styles.trackStockText, { color: colors.text }]}>Track stock for this item</Text>
+              </TouchableOpacity>
+
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Supplier</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                    color: colors.inputText,
+                  },
+                ]}
                 placeholder="Supplier name"
-                placeholderTextColor="#718096"
+                placeholderTextColor={colors.placeholder}
                 value={supplier}
                 onChangeText={setSupplier}
               />
 
-              <Text style={styles.label}>Location</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Location</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                    color: colors.inputText,
+                  },
+                ]}
                 placeholder="e.g. Shelf A, Store Room"
-                placeholderTextColor="#718096"
+                placeholderTextColor={colors.placeholder}
                 value={location}
                 onChangeText={setLocation}
               />
 
-              <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                <Text style={styles.saveButtonText}>
+              <TouchableOpacity
+                style={[styles.saveButton, { backgroundColor: colors.primary }]}
+                onPress={handleSave}
+              >
+                <Text style={[styles.saveButtonText, { color: colors.primaryText }]}>
                   {editingItem ? "Update Item" : "Add Item"}
                 </Text>
               </TouchableOpacity>
@@ -505,10 +702,19 @@ export default function CatalogueScreen() {
 
       {/* Movement Modal */}
       <Modal visible={movementModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxHeight: "50%" }]}>
+        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+          <View
+            style={[
+              styles.modalContent,
+              {
+                maxHeight: "55%",
+                backgroundColor: colors.modalBackground,
+                borderColor: colors.modalBorder,
+              },
+            ]}
+          >
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {movementType === "in" ? "Stock In" : "Stock Out"} —{" "}
                 {selectedItem?.name}
               </Text>
@@ -519,7 +725,7 @@ export default function CatalogueScreen() {
                   setMovementReason("");
                 }}
               >
-                <Ionicons name="close" size={24} color="#FFFFFF" />
+                <X size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -527,14 +733,29 @@ export default function CatalogueScreen() {
               <TouchableOpacity
                 style={[
                   styles.toggleBtn,
-                  movementType === "in" && styles.toggleBtnActiveIn,
+                  {
+                    backgroundColor:
+                      movementType === "in"
+                        ? colors.primary
+                        : colors.surfaceSubtle,
+                    borderColor:
+                      movementType === "in"
+                        ? colors.primary
+                        : colors.border,
+                  },
                 ]}
                 onPress={() => setMovementType("in")}
               >
                 <Text
                   style={[
                     styles.toggleBtnText,
-                    movementType === "in" && styles.toggleBtnTextActive,
+                    {
+                      color:
+                        movementType === "in"
+                          ? colors.primaryText
+                          : colors.textSecondary,
+                      fontWeight: movementType === "in" ? "700" : "500",
+                    },
                   ]}
                 >
                   + In
@@ -543,14 +764,29 @@ export default function CatalogueScreen() {
               <TouchableOpacity
                 style={[
                   styles.toggleBtn,
-                  movementType === "out" && styles.toggleBtnActiveOut,
+                  {
+                    backgroundColor:
+                      movementType === "out"
+                        ? colors.danger
+                        : colors.surfaceSubtle,
+                    borderColor:
+                      movementType === "out"
+                        ? colors.danger
+                        : colors.border,
+                  },
                 ]}
                 onPress={() => setMovementType("out")}
               >
                 <Text
                   style={[
                     styles.toggleBtnText,
-                    movementType === "out" && styles.toggleBtnTextActive,
+                    {
+                      color:
+                        movementType === "out"
+                          ? "#FFFFFF"
+                          : colors.textSecondary,
+                      fontWeight: movementType === "out" ? "700" : "500",
+                    },
                   ]}
                 >
                   - Out
@@ -558,21 +794,35 @@ export default function CatalogueScreen() {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.label}>Quantity</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Quantity</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.inputText,
+                },
+              ]}
               placeholder="How many?"
-              placeholderTextColor="#718096"
+              placeholderTextColor={colors.placeholder}
               value={movementQty}
               onChangeText={setMovementQty}
               keyboardType="numeric"
             />
 
-            <Text style={styles.label}>Reason (optional)</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Reason (optional)</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.inputText,
+                },
+              ]}
               placeholder="e.g. Sold to customer, New delivery"
-              placeholderTextColor="#718096"
+              placeholderTextColor={colors.placeholder}
               value={movementReason}
               onChangeText={setMovementReason}
             />
@@ -582,12 +832,22 @@ export default function CatalogueScreen() {
                 styles.saveButton,
                 {
                   backgroundColor:
-                    movementType === "in" ? "#F6A623" : "#E53E3E",
+                    movementType === "in" ? colors.primary : colors.danger,
                 },
               ]}
               onPress={handleMovement}
             >
-              <Text style={styles.saveButtonText}>
+              <Text
+                style={[
+                  styles.saveButtonText,
+                  {
+                    color:
+                      movementType === "in"
+                        ? colors.primaryText
+                        : "#FFFFFF",
+                  },
+                ]}
+              >
                 Confirm {movementType === "in" ? "Stock In" : "Stock Out"}
               </Text>
             </TouchableOpacity>
@@ -599,7 +859,7 @@ export default function CatalogueScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0A0F1E" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -608,40 +868,34 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 16,
   },
-  headerTitle: { fontSize: 28, fontWeight: "700", color: "#FFFFFF" },
+  headerTitle: { fontSize: 28, fontWeight: "700" },
   addButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F6A623",
     alignItems: "center",
     justifyContent: "center",
   },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#131929",
     borderRadius: 12,
     marginHorizontal: 20,
     marginBottom: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "#1E2A3D",
   },
-  searchInput: { flex: 1, marginLeft: 8, fontSize: 14, color: "#FFFFFF" },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 14 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
-  emptyText: { fontSize: 16, fontWeight: "600", color: "#718096" },
-  emptySubtext: { fontSize: 13, color: "#4A5568" },
+  emptyText: { fontSize: 16, fontWeight: "600" },
+  emptySubtext: { fontSize: 13 },
   list: { padding: 20, gap: 12 },
   itemCard: {
-    backgroundColor: "#131929",
     borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#1E2A3D",
   },
-  itemCardLow: { borderColor: "#FC8181", backgroundColor: "#2D1B00" },
   itemTop: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -649,15 +903,12 @@ const styles = StyleSheet.create({
   },
   itemLeft: { flex: 1 },
   itemRight: { alignItems: "flex-end" },
-  itemName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
-  itemCategory: { fontSize: 12, color: "#718096", marginTop: 2 },
-  itemQty: { fontSize: 16, fontWeight: "700", color: "#F6A623" },
-  itemQtyLow: { color: "#FC8181" },
+  itemName: { fontSize: 15, fontWeight: "700" },
+  itemCategory: { fontSize: 12, marginTop: 2 },
+  itemQty: { fontSize: 16, fontWeight: "700" },
   lowStockBadge: {
     fontSize: 10,
     fontWeight: "600",
-    color: "#FC8181",
-    backgroundColor: "#FC818122",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -669,33 +920,49 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 12,
   },
-  metaText: { fontSize: 12, color: "#A0AEC0" },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  metaText: { fontSize: 12 },
   itemActions: { flexDirection: "row", gap: 8, alignItems: "center" },
   actionBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
-  inBtn: { backgroundColor: "#F6A62322" },
-  outBtn: { backgroundColor: "#E53E3E22" },
-  inBtnText: { fontSize: 12, fontWeight: "600", color: "#F6A623" },
-  outBtnText: { fontSize: 12, fontWeight: "600", color: "#FC8181" },
+  inBtnText: { fontSize: 12, fontWeight: "600" },
+  outBtnText: { fontSize: 12, fontWeight: "600" },
+  trackStockRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 16,
+  },
+  trackStockCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 5,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trackStockText: { fontSize: 14, fontWeight: "600" },
   iconBtn: {
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: "#1E2A3D",
     alignItems: "center",
     justifyContent: "center",
     marginLeft: "auto",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "flex-end",
   },
   modalContent: {
-    backgroundColor: "#0F1923",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
     maxHeight: "90%",
+    borderWidth: 1,
   },
   modalHeader: {
     flexDirection: "row",
@@ -706,21 +973,17 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#FFFFFF",
     flex: 1,
     marginRight: 8,
   },
-  label: { fontSize: 13, fontWeight: "600", color: "#A0AEC0", marginBottom: 6 },
+  label: { fontSize: 13, fontWeight: "600", marginBottom: 6 },
   input: {
-    backgroundColor: "#131929",
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
-    color: "#FFFFFF",
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#1E2A3D",
   },
   row: { flexDirection: "row", gap: 12 },
   rowItem: { flex: 1 },
@@ -728,33 +991,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: "#131929",
     borderWidth: 1,
-    borderColor: "#1E2A3D",
   },
-  chipActive: { backgroundColor: "#F6A623", borderColor: "#F6A623" },
-  chipText: { fontSize: 13, fontWeight: "500", color: "#A0AEC0" },
-  chipTextActive: { color: "#0A0F1E" },
+  chipText: { fontSize: 13 },
   saveButton: {
-    backgroundColor: "#F6A623",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
     marginTop: 8,
   },
-  saveButtonText: { fontSize: 16, fontWeight: "700", color: "#0A0F1E" },
+  saveButtonText: { fontSize: 16, fontWeight: "700" },
   movementToggle: { flexDirection: "row", gap: 12, marginBottom: 16 },
   toggleBtn: {
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: "center",
-    backgroundColor: "#131929",
     borderWidth: 1,
-    borderColor: "#1E2A3D",
   },
-  toggleBtnActiveIn: { backgroundColor: "#F6A62322", borderColor: "#F6A623" },
-  toggleBtnActiveOut: { backgroundColor: "#E53E3E22", borderColor: "#E53E3E" },
-  toggleBtnText: { fontSize: 14, fontWeight: "600", color: "#A0AEC0" },
-  toggleBtnTextActive: { color: "#FFFFFF" },
+  toggleBtnText: { fontSize: 14 },
 });

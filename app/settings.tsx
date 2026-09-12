@@ -1,30 +1,46 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
-import { ArrowLeft, ChevronRight, KeyRound, LogOut } from "lucide-react-native";
+import {
+    ArrowLeft,
+    ChevronRight,
+    KeyRound,
+    LogOut,
+    Moon,
+    Smartphone,
+    Sun,
+} from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
+import { CURRENCIES, CurrencyCode, DEFAULT_CURRENCY } from "../constants/currency";
+import { DEFAULT_COUNTRY_CODE } from "../constants/phone";
 import { supabase } from "../constants/supabase";
+import { ThemeMode } from "../constants/theme";
+import { useTheme } from "../context/theme-context";
 
 export default function SettingsScreen() {
+  const { colors, isDark, themeMode, setThemeMode, setPinUnlocked, currency, setCurrency, defaultCountryCode, setDefaultCountryCode } = useTheme();
+
   const [businessName, setBusinessName] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [phone, setPhone] = useState("");
   const [completionMessage, setCompletionMessage] = useState(
     "Hi {name}, your job is completed and ready!",
   );
+  const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState("");
+  const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
 
   useEffect(() => {
     loadSettings();
@@ -45,6 +61,12 @@ export default function SettingsScreen() {
         parsed.completionMessage ||
           "Hi {name}, your job is completed and ready!",
       );
+      setCurrency(
+        parsed.currency && parsed.currency in CURRENCIES
+          ? parsed.currency
+          : DEFAULT_CURRENCY,
+      );
+      setCountryCode(parsed.default_country_code || DEFAULT_COUNTRY_CODE);
     }
     setLoading(false);
   };
@@ -53,8 +75,16 @@ export default function SettingsScreen() {
     setSaving(true);
     await AsyncStorage.setItem(
       "business_settings",
-      JSON.stringify({ businessName, ownerName, phone, completionMessage }),
+      JSON.stringify({
+        businessName,
+        ownerName,
+        phone,
+        completionMessage,
+        currency,
+        default_country_code: countryCode.replace(/\D/g, "") || DEFAULT_COUNTRY_CODE,
+      }),
     );
+    await setDefaultCountryCode(countryCode);
     setSaving(false);
     Alert.alert("Saved", "Your settings have been updated.");
   };
@@ -98,24 +128,45 @@ export default function SettingsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#F6A623" />
+      <View
+        style={[
+          styles.loadingContainer,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0F1E" />
+  const themeOptions: { key: ThemeMode; label: string; icon: any }[] = [
+    { key: "system", label: "System", icon: Smartphone },
+    { key: "light", label: "Light", icon: Sun },
+    { key: "dark", label: "Dark", icon: Moon },
+  ];
 
+  const currencyOptions = (Object.entries(CURRENCIES) as [CurrencyCode, (typeof CURRENCIES)[CurrencyCode]][]).map(([code, meta]) => ({
+    key: code,
+    label: `${meta.name} (${meta.symbol})`,
+  }));
+
+  const handleCurrencyPress = (code: CurrencyCode) => {
+    setCurrency(code);
+    setCurrencyModalVisible(true);
+  };
+
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <ArrowLeft size={24} color="#FFFFFF" />
+          <ArrowLeft size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          Settings
+        </Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -123,55 +174,252 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.accountCard}>
-          <View style={styles.accountAvatar}>
-            <Text style={styles.accountAvatarText}>
+        <View
+          style={[
+            styles.accountCard,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.accountAvatar,
+              { backgroundColor: colors.primary },
+            ]}
+          >
+            <Text
+              style={[
+                styles.accountAvatarText,
+                { color: colors.primaryText },
+              ]}
+            >
               {businessName ? businessName.charAt(0).toUpperCase() : "T"}
             </Text>
           </View>
           <View>
-            <Text style={styles.accountName}>
+            <Text style={[styles.accountName, { color: colors.text }]}>
               {businessName || "Your Business"}
             </Text>
-            <Text style={styles.accountEmail}>{userEmail}</Text>
+            <Text style={[styles.accountEmail, { color: colors.textMuted }]}>
+              {userEmail}
+            </Text>
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Business Details</Text>
-        <View style={styles.card}>
-          <Text style={styles.label}>Business Name</Text>
+        {/* Appearance / Theme Selector */}
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+          Appearance
+        </Text>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View style={styles.themeToggleRow}>
+            {themeOptions.map((opt) => {
+              const Icon = opt.icon;
+              const isSelected = themeMode === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[
+                    styles.themeOptionBtn,
+                    {
+                      backgroundColor: isSelected
+                        ? isDark
+                          ? colors.surfaceHighlight
+                          : colors.secondarySurface
+                        : colors.inputBackground,
+                      borderColor: isSelected
+                        ? colors.primary
+                        : colors.inputBorder,
+                    },
+                  ]}
+                  onPress={() => setThemeMode(opt.key)}
+                  activeOpacity={0.7}
+                >
+                  <Icon
+                    size={18}
+                    color={
+                      isSelected
+                        ? colors.primary
+                        : colors.textSecondary
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.themeOptionText,
+                      {
+                        color: isSelected
+                          ? colors.text
+                          : colors.textSecondary,
+                        fontWeight: isSelected ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+          Currency
+        </Text>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View style={styles.themeToggleRow}>
+            {currencyOptions.map((opt) => {
+              const isSelected = currency === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[
+                    styles.themeOptionBtn,
+                    {
+                      backgroundColor: isSelected
+                        ? isDark
+                          ? colors.surfaceHighlight
+                          : colors.secondarySurface
+                        : colors.inputBackground,
+                      borderColor: isSelected
+                        ? colors.primary
+                        : colors.inputBorder,
+                    },
+                  ]}
+                  onPress={() => handleCurrencyPress(opt.key)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.themeOptionText,
+                      {
+                        color: isSelected ? colors.text : colors.textSecondary,
+                        fontWeight: isSelected ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+          Business Details
+        </Text>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Business Name
+          </Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="e.g. Emeka's Auto Repairs"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={businessName}
             onChangeText={setBusinessName}
           />
-          <Text style={styles.label}>Owner Name</Text>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Owner Name
+          </Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="e.g. Emeka Okafor"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={ownerName}
             onChangeText={setOwnerName}
           />
-          <Text style={styles.label}>Phone Number</Text>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Phone Number
+          </Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="e.g. 08012345678"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={phone}
             onChangeText={setPhone}
             keyboardType="phone-pad"
           />
-          <Text style={styles.label}>Completion Message Template</Text>
-          <Text style={styles.helperText}>
-            Use {"{name}"} to insert the customer's name.
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Default Country Code</Text>
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.inputText,
+                },
+              ]}
+              placeholder="234"
+              placeholderTextColor={colors.placeholder}
+              value={countryCode}
+              onChangeText={setCountryCode}
+              keyboardType="number-pad"
+            />
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Completion Message Template
+          </Text>
+          <Text style={[styles.helperText, { color: colors.textMuted }]}>
+            Use {"{name}"} to insert the customer&apos;s name.
           </Text>
           <TextInput
-            style={[styles.input, styles.textArea]}
+            style={[
+              styles.input,
+              styles.textArea,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+                color: colors.inputText,
+              },
+            ]}
             placeholder="Hi {name}, your job is ready!"
-            placeholderTextColor="#4A5568"
+            placeholderTextColor={colors.placeholder}
             value={completionMessage}
             onChangeText={setCompletionMessage}
             multiline
@@ -179,43 +427,110 @@ export default function SettingsScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+          style={[
+            styles.saveButton,
+            { backgroundColor: colors.primary },
+            saving && styles.saveButtonDisabled,
+          ]}
           onPress={handleSave}
           disabled={saving}
         >
           {saving ? (
-            <ActivityIndicator color="#0A0F1E" />
+            <ActivityIndicator color={colors.primaryText} />
           ) : (
-            <Text style={styles.saveButtonText}>Save Changes</Text>
+            <Text
+              style={[
+                styles.saveButtonText,
+                { color: colors.primaryText },
+              ]}
+            >
+              Save Changes
+            </Text>
           )}
         </TouchableOpacity>
 
-        <Text style={styles.sectionTitle}>Security</Text>
-        <View style={styles.card}>
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+          Security
+        </Text>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <TouchableOpacity style={styles.menuRow} onPress={handleChangePin}>
             <View style={styles.menuRowLeft}>
-              <KeyRound size={20} color="#F6A623" />
-              <Text style={styles.menuRowText}>Change PIN</Text>
+              <KeyRound size={20} color={colors.primary} />
+              <Text style={[styles.menuRowText, { color: colors.text }]}>
+                Change PIN
+              </Text>
             </View>
-            <ChevronRight size={18} color="#4A5568" />
+            <ChevronRight size={18} color={colors.textMuted} />
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.sectionTitle}>Account</Text>
-        <View style={styles.card}>
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+          Account
+        </Text>
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <TouchableOpacity style={styles.menuRow} onPress={handleLogout}>
             <View style={styles.menuRowLeft}>
-              <LogOut size={20} color="#E53E3E" />
-              <Text style={[styles.menuRowText, { color: "#E53E3E" }]}>
+              <LogOut size={20} color={colors.danger} />
+              <Text style={[styles.menuRowText, { color: colors.danger }]}>
                 Log Out
               </Text>
             </View>
-            <ChevronRight size={18} color="#4A5568" />
+            <ChevronRight size={18} color={colors.textMuted} />
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.version}>TradeApp v1.0.0</Text>
+        <Text style={[styles.version, { color: colors.textMuted }]}>
+          TradeApp v1.0.0
+        </Text>
       </ScrollView>
+
+      <Modal
+        visible={currencyModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCurrencyModalVisible(false)}
+      >
+        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+          <View
+            style={[
+              styles.currencyModal,
+              {
+                backgroundColor: colors.modalBackground,
+                borderColor: colors.modalBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.currencyModalTitle, { color: colors.text }]}>
+              {CURRENCIES[currency as keyof typeof CURRENCIES]?.name} ✓
+            </Text>
+            <Text style={[styles.currencyModalText, { color: colors.textSecondary }]}>
+              More currencies are coming soon.
+            </Text>
+            <TouchableOpacity
+              style={[styles.currencyModalButton, { backgroundColor: colors.primary }]}
+              onPress={() => setCurrencyModalVisible(false)}
+            >
+              <Text style={[styles.currencyModalButtonText, { color: colors.primaryText }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -223,11 +538,10 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: "#0A0F1E",
     alignItems: "center",
     justifyContent: "center",
   },
-  container: { flex: 1, backgroundColor: "#0A0F1E" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -242,70 +556,77 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: "#FFFFFF", flex: 1 },
+  headerTitle: { fontSize: 22, fontWeight: "700", flex: 1 },
   scroll: { paddingHorizontal: 20, paddingBottom: 60 },
   accountCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
-    backgroundColor: "#131929",
     borderRadius: 14,
     padding: 16,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: "#1E2A3D",
   },
   accountAvatar: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#F6A623",
     alignItems: "center",
     justifyContent: "center",
   },
-  accountAvatarText: { fontSize: 22, fontWeight: "700", color: "#0A0F1E" },
-  accountName: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
-  accountEmail: { fontSize: 13, color: "#718096", marginTop: 2 },
+  accountAvatarText: { fontSize: 22, fontWeight: "700" },
+  accountName: { fontSize: 16, fontWeight: "700" },
+  accountEmail: { fontSize: 13, marginTop: 2 },
   sectionTitle: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#4A5568",
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 10,
     marginTop: 8,
   },
   card: {
-    backgroundColor: "#131929",
     borderRadius: 14,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#1E2A3D",
   },
-  label: { fontSize: 13, fontWeight: "500", color: "#A0AEC0", marginBottom: 6 },
-  helperText: { fontSize: 11, color: "#718096", marginBottom: 6 },
+  themeToggleRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  themeOptionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+  },
+  themeOptionText: {
+    fontSize: 13,
+  },
+  label: { fontSize: 13, fontWeight: "500", marginBottom: 6 },
+  helperText: { fontSize: 11, marginBottom: 6 },
   input: {
-    backgroundColor: "#0A0F1E",
     borderWidth: 1,
-    borderColor: "#1E2A3D",
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
-    color: "#FFFFFF",
     marginBottom: 16,
   },
   textArea: { height: 80, textAlignVertical: "top", marginBottom: 0 },
   saveButton: {
-    backgroundColor: "#F6A623",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
     marginBottom: 24,
   },
   saveButtonDisabled: { opacity: 0.7 },
-  saveButtonText: { fontSize: 16, fontWeight: "700", color: "#0A0F1E" },
+  saveButtonText: { fontSize: 16, fontWeight: "700" },
   menuRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -313,11 +634,46 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   menuRowLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
-  menuRowText: { fontSize: 15, fontWeight: "500", color: "#FFFFFF" },
+  menuRowText: { fontSize: 15, fontWeight: "500" },
   version: {
     textAlign: "center",
     fontSize: 12,
-    color: "#2D3748",
     marginTop: 8,
+  },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  currencyModal: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 20,
+    alignItems: "center",
+  },
+  currencyModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  currencyModalText: {
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 18,
+    lineHeight: 22,
+  },
+  currencyModalButton: {
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    width: "100%",
+    alignItems: "center",
+  },
+  currencyModalButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
   },
 });

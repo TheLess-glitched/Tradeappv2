@@ -1,17 +1,20 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
+import { Delete } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  Vibration,
-  View,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    Vibration,
+    View,
 } from "react-native";
 import { supabase } from "../constants/supabase";
+import { useTheme } from "../context/theme-context";
 
 export default function PinScreen() {
+  const { colors, setPinUnlocked } = useTheme();
+
   const [pin, setPin] = useState("");
   const [mode, setMode] = useState<"enter" | "set" | "confirm">("enter");
   const [tempPin, setTempPin] = useState("");
@@ -65,6 +68,7 @@ export default function PinScreen() {
       if (enteredPin === tempPin) {
         await AsyncStorage.setItem(pinKey, enteredPin);
         await AsyncStorage.setItem(hasSetKey, "true");
+        setPinUnlocked(true);
         router.replace("/(tabs)/home");
       } else {
         setError("PINs don't match. Try again.");
@@ -76,6 +80,7 @@ export default function PinScreen() {
     } else {
       const savedPin = await AsyncStorage.getItem(pinKey);
       if (enteredPin === savedPin) {
+        setPinUnlocked(true);
         router.replace("/(tabs)/home");
       } else {
         setError("Incorrect PIN");
@@ -90,27 +95,25 @@ export default function PinScreen() {
     setError("");
   };
 
-  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"];
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0F1E" />
-
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.brandSection}>
-        <View style={styles.logoBox}>
-          <Text style={styles.logoText}>T</Text>
+        <View style={[styles.logoBox, { backgroundColor: colors.primary }]}>
+          <Text style={[styles.logoText, { color: colors.primaryText }]}>T</Text>
         </View>
-        <Text style={styles.appName}>TradeApp</Text>
+        <Text style={[styles.appName, { color: colors.text }]}>TradeApp</Text>
       </View>
 
-      <Text style={styles.title}>
+      <Text style={[styles.title, { color: colors.text }]}>
         {mode === "set"
           ? "Set your PIN"
           : mode === "confirm"
             ? "Confirm your PIN"
             : "Enter your PIN"}
       </Text>
-      <Text style={styles.subtitle}>
+      <Text style={[styles.subtitle, { color: colors.textMuted }]}>
         {mode === "set"
           ? "Choose a 6-digit PIN to secure your account"
           : mode === "confirm"
@@ -122,25 +125,39 @@ export default function PinScreen() {
         {[0, 1, 2, 3, 4, 5].map((i) => (
           <View
             key={i}
-            style={[styles.dot, pin.length > i && styles.dotFilled]}
+            style={[
+              styles.dot,
+              { borderColor: colors.primary },
+              pin.length > i && { backgroundColor: colors.primary },
+            ]}
           />
         ))}
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
       <View style={styles.keypad}>
         {keys.map((key, index) => (
           <TouchableOpacity
             key={index}
-            style={[styles.key, key === "" && styles.keyEmpty]}
+            style={[
+              styles.key,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+              key === "" && styles.keyEmpty,
+            ]}
             onPress={() => {
-              if (key === "⌫") handleDelete();
+              if (key === "del") handleDelete();
               else if (key !== "") handleNumber(key);
             }}
             disabled={key === ""}
+            activeOpacity={0.8}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Text style={styles.keyText}>{key}</Text>
+            {key === "del" ? (
+              <Delete size={22} color={colors.text} />
+            ) : (
+              <Text style={[styles.keyText, { color: colors.text }]}>{key}</Text>
+            )}
           </TouchableOpacity>
         ))}
       </View>
@@ -151,7 +168,6 @@ export default function PinScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0A0F1E",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 24,
@@ -161,17 +177,15 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 14,
-    backgroundColor: "#F6A623",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
   },
-  logoText: { fontSize: 28, fontWeight: "800", color: "#0A0F1E" },
-  appName: { fontSize: 22, fontWeight: "700", color: "#FFFFFF" },
-  title: { fontSize: 20, fontWeight: "600", color: "#FFFFFF", marginBottom: 8 },
+  logoText: { fontSize: 28, fontWeight: "800" },
+  appName: { fontSize: 22, fontWeight: "700" },
+  title: { fontSize: 20, fontWeight: "600", marginBottom: 8 },
   subtitle: {
     fontSize: 14,
-    color: "#718096",
     marginBottom: 32,
     textAlign: "center",
   },
@@ -181,11 +195,9 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: "#F6A623",
     backgroundColor: "transparent",
   },
-  dotFilled: { backgroundColor: "#F6A623" },
-  error: { color: "#FC8181", fontSize: 13, marginBottom: 16 },
+  error: { fontSize: 13, marginBottom: 16 },
   keypad: { flexDirection: "row", flexWrap: "wrap", width: 300, marginTop: 16 },
   key: {
     width: 80,
@@ -194,8 +206,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     margin: 6,
     borderRadius: 40,
-    backgroundColor: "#131929",
+    borderWidth: 1,
   },
-  keyEmpty: { backgroundColor: "transparent" },
-  keyText: { fontSize: 24, fontWeight: "600", color: "#FFFFFF" },
+  keyEmpty: { backgroundColor: "transparent", borderWidth: 0 },
+  keyText: { fontSize: 24, fontWeight: "600" },
 });

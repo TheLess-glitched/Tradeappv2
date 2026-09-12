@@ -1,20 +1,20 @@
 import { DrawerNavigationProp } from "@react-navigation/drawer";
 import { useNavigation } from "@react-navigation/native";
-import { ArrowLeft } from "lucide-react-native";
+import { AlertTriangle, ArrowLeft } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { supabase } from "../constants/supabase";
+import { useTheme } from "../context/theme-context";
 
 type Item = {
   id: number;
@@ -25,6 +25,8 @@ type Item = {
 };
 
 export default function InventoryScreen() {
+  const { colors } = useTheme();
+
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -132,41 +134,64 @@ export default function InventoryScreen() {
   const lowStockItems = items.filter((i) => i.quantity <= i.low_stock_alert);
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0A0F1E" />
-
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.menuButton}
         >
-          <ArrowLeft size={26} color="#FFFFFF" />
+          <ArrowLeft size={26} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Inventory</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Inventory</Text>
         <TouchableOpacity
-          style={styles.addButton}
+          style={[styles.addButton, { backgroundColor: colors.primary }]}
           onPress={() => setModalVisible(true)}
         >
-          <Text style={styles.addButtonText}>+ Add</Text>
+          <Text style={[styles.addButtonText, { color: colors.primaryText }]}>+ Add</Text>
         </TouchableOpacity>
       </View>
 
       {lowStockItems.length > 0 && (
-        <View style={styles.warningBanner}>
-          <Text style={styles.warningText}>
-            ⚠️ {lowStockItems.length} item{lowStockItems.length > 1 ? "s" : ""}{" "}
+        <View
+          style={[
+            styles.warningBanner,
+            {
+              backgroundColor: colors.dangerSurface,
+              borderColor: colors.danger,
+            },
+          ]}
+        >
+          <AlertTriangle size={16} color={colors.danger} />
+          <Text style={[styles.warningText, { color: colors.danger }]}>
+            {lowStockItems.length} item{lowStockItems.length > 1 ? "s" : ""}{" "}
             running low
           </Text>
         </View>
       )}
 
       {loading ? (
-        <ActivityIndicator color="#F6A623" style={{ marginTop: 40 }} />
+        <View style={styles.skeletonList}>
+          {[0, 1, 2].map((item) => (
+            <View
+              key={item}
+              style={[
+                styles.skeletonCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View style={[styles.skeletonLine, { width: "48%", backgroundColor: colors.border }]} />
+              <View style={[styles.skeletonLine, { width: "30%", backgroundColor: colors.border }]} />
+            </View>
+          ))}
+        </View>
       ) : items.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyText}>No items yet</Text>
-          <Text style={styles.emptySubText}>
-            Tap "+ Add" to track your first item
+          <View style={[styles.emptyIconWrap, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
+            <AlertTriangle size={24} color={colors.primary} />
+          </View>
+          <Text style={[styles.emptyText, { color: colors.text }]}>No items yet</Text>
+          <Text style={[styles.emptySubText, { color: colors.textMuted }]}>
+            Tap + Add to track your first item
           </Text>
         </View>
       ) : (
@@ -179,17 +204,34 @@ export default function InventoryScreen() {
             return (
               <View
                 key={item.id}
-                style={[styles.itemCard, isLow && styles.itemCardLow]}
+                style={[
+                  styles.itemCard,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                  isLow && {
+                    borderColor: colors.danger,
+                    backgroundColor: colors.dangerSurface,
+                  },
+                ]}
               >
                 <View style={styles.itemTop}>
                   <View>
-                    <Text style={styles.itemName}>{item.name}</Text>
-                    <Text style={styles.itemUnit}>
+                    <Text style={[styles.itemName, { color: colors.text }]}>
+                      {item.name}
+                    </Text>
+                    <Text style={[styles.itemUnit, { color: colors.textMuted }]}>
                       {item.unit || "units"} · Alert at {item.low_stock_alert}
                     </Text>
                   </View>
                   {isLow && (
-                    <View style={styles.lowBadge}>
+                    <View
+                      style={[
+                        styles.lowBadge,
+                        { backgroundColor: colors.danger },
+                      ]}
+                    >
                       <Text style={styles.lowBadgeText}>Low</Text>
                     </View>
                   )}
@@ -197,25 +239,48 @@ export default function InventoryScreen() {
 
                 <View style={styles.itemBottom}>
                   <TouchableOpacity
-                    style={styles.qtyButton}
+                    style={[
+                      styles.qtyButton,
+                      {
+                        backgroundColor: colors.surfaceSubtle,
+                        borderColor: colors.border,
+                      },
+                    ]}
                     onPress={() => adjustQuantity(item, -1)}
+                    activeOpacity={0.8}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
-                    <Text style={styles.qtyButtonText}>−</Text>
+                    <Text style={[styles.qtyButtonText, { color: colors.text }]}>−</Text>
                   </TouchableOpacity>
-                  <Text style={[styles.qtyValue, isLow && styles.qtyValueLow]}>
+                  <Text
+                    style={[
+                      styles.qtyValue,
+                      { color: colors.text },
+                      isLow && { color: colors.danger },
+                    ]}
+                  >
                     {item.quantity}
                   </Text>
                   <TouchableOpacity
-                    style={styles.qtyButton}
+                    style={[
+                      styles.qtyButton,
+                      {
+                        backgroundColor: colors.surfaceSubtle,
+                        borderColor: colors.border,
+                      },
+                    ]}
                     onPress={() => adjustQuantity(item, 1)}
+                    activeOpacity={0.8}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
-                    <Text style={styles.qtyButtonText}>+</Text>
+                    <Text style={[styles.qtyButtonText, { color: colors.text }]}>+</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.deleteButton}
                     onPress={() => deleteItem(item.id, item.name)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
-                    <Text style={styles.deleteText}>Remove</Text>
+                    <Text style={[styles.deleteText, { color: colors.danger }]}>Remove</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -225,57 +290,100 @@ export default function InventoryScreen() {
       )}
 
       <Modal visible={modalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>New Item</Text>
+        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+          <View
+            style={[
+              styles.modalBox,
+              {
+                backgroundColor: colors.modalBackground,
+                borderColor: colors.modalBorder,
+                borderWidth: 1,
+              },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: colors.text }]}>New Item</Text>
 
-            <Text style={styles.label}>Item Name *</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Item Name *</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.inputText,
+                },
+              ]}
               placeholder="e.g. Engine Oil, Hair relaxer"
-              placeholderTextColor="#4A5568"
+              placeholderTextColor={colors.placeholder}
               value={name}
               onChangeText={setName}
             />
 
-            <Text style={styles.label}>Quantity *</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Quantity *</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.inputText,
+                },
+              ]}
               placeholder="e.g. 10"
-              placeholderTextColor="#4A5568"
+              placeholderTextColor={colors.placeholder}
               value={quantity}
               onChangeText={setQuantity}
               keyboardType="numeric"
             />
 
-            <Text style={styles.label}>Unit</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Unit</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.inputText,
+                },
+              ]}
               placeholder="e.g. litres, packs, pieces"
-              placeholderTextColor="#4A5568"
+              placeholderTextColor={colors.placeholder}
               value={unit}
               onChangeText={setUnit}
             />
 
-            <Text style={styles.label}>Low Stock Alert</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Low Stock Alert</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                  color: colors.inputText,
+                },
+              ]}
               placeholder="e.g. 5"
-              placeholderTextColor="#4A5568"
+              placeholderTextColor={colors.placeholder}
               value={lowStockAlert}
               onChangeText={setLowStockAlert}
               keyboardType="numeric"
             />
 
             <TouchableOpacity
-              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+              style={[
+                styles.saveButton,
+                { backgroundColor: colors.primary },
+                saving && styles.saveButtonDisabled,
+              ]}
               onPress={handleAdd}
               disabled={saving}
             >
               {saving ? (
-                <ActivityIndicator color="#0A0F1E" />
+                <ActivityIndicator color={colors.primaryText} />
               ) : (
-                <Text style={styles.saveButtonText}>Save Item</Text>
+                <Text style={[styles.saveButtonText, { color: colors.primaryText }]}>
+                  Save Item
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -283,7 +391,7 @@ export default function InventoryScreen() {
               style={styles.cancelButton}
               onPress={() => setModalVisible(false)}
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={[styles.cancelButtonText, { color: colors.textMuted }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -293,7 +401,7 @@ export default function InventoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0A0F1E" },
+  container: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -308,83 +416,95 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  headerTitle: { fontSize: 22, fontWeight: "700", color: "#FFFFFF", flex: 1 },
+  headerTitle: { fontSize: 22, fontWeight: "700", flex: 1 },
   addButton: {
-    backgroundColor: "#F6A623",
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  addButtonText: { fontSize: 14, fontWeight: "700", color: "#0A0F1E" },
+  addButtonText: { fontSize: 14, fontWeight: "700" },
   warningBanner: {
     marginHorizontal: 20,
     marginBottom: 12,
-    backgroundColor: "#2D1B00",
     borderRadius: 10,
     padding: 12,
     borderWidth: 1,
-    borderColor: "#F6A623",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
-  warningText: { fontSize: 13, color: "#F6A623", fontWeight: "600" },
+  warningText: { fontSize: 13, fontWeight: "600" },
+  skeletonList: { paddingHorizontal: 20, paddingTop: 12, gap: 12 },
+  skeletonCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+    gap: 10,
+  },
+  skeletonLine: {
+    height: 12,
+    borderRadius: 6,
+  },
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },
   itemCard: {
-    backgroundColor: "#131929",
     borderRadius: 14,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "#1E2A3D",
   },
-  itemCardLow: { borderColor: "#F6A623" },
   itemTop: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginBottom: 12,
   },
-  itemName: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
-  itemUnit: { fontSize: 12, color: "#718096", marginTop: 2 },
+  itemName: { fontSize: 15, fontWeight: "700" },
+  itemUnit: { fontSize: 12, marginTop: 2 },
   lowBadge: {
-    backgroundColor: "#F6A623",
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  lowBadgeText: { fontSize: 11, fontWeight: "700", color: "#0A0F1E" },
+  lowBadgeText: { fontSize: 11, fontWeight: "700", color: "#FFFFFF" },
   itemBottom: { flexDirection: "row", alignItems: "center", gap: 12 },
   qtyButton: {
     width: 36,
     height: 36,
     borderRadius: 8,
-    backgroundColor: "#1E2A3D",
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  qtyButtonText: { fontSize: 20, color: "#FFFFFF", fontWeight: "600" },
+  qtyButtonText: { fontSize: 20, fontWeight: "600" },
   qtyValue: {
     fontSize: 20,
     fontWeight: "800",
-    color: "#FFFFFF",
     minWidth: 40,
     textAlign: "center",
   },
-  qtyValueLow: { color: "#F6A623" },
   deleteButton: {
     marginLeft: "auto",
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
-  deleteText: { fontSize: 12, color: "#E53E3E", fontWeight: "600" },
-  emptyState: { alignItems: "center", paddingVertical: 60 },
-  emptyText: { fontSize: 16, fontWeight: "600", color: "#4A5568" },
-  emptySubText: { fontSize: 13, color: "#2D3748", marginTop: 4 },
+  deleteText: { fontSize: 12, fontWeight: "600" },
+  emptyState: { alignItems: "center", paddingVertical: 60, paddingHorizontal: 32 },
+  emptyIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  emptyText: { fontSize: 18, fontWeight: "700", marginBottom: 6 },
+  emptySubText: { fontSize: 13, textAlign: "center" },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "flex-end",
   },
   modalBox: {
-    backgroundColor: "#0F1923",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
@@ -393,23 +513,18 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#FFFFFF",
     marginBottom: 20,
   },
-  label: { fontSize: 13, fontWeight: "500", color: "#A0AEC0", marginBottom: 6 },
+  label: { fontSize: 13, fontWeight: "500", marginBottom: 6 },
   input: {
-    backgroundColor: "#131929",
     borderWidth: 1,
-    borderColor: "#1E2A3D",
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
-    color: "#FFFFFF",
     marginBottom: 16,
   },
   saveButton: {
-    backgroundColor: "#F6A623",
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: "center",
@@ -417,7 +532,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   saveButtonDisabled: { opacity: 0.7 },
-  saveButtonText: { fontSize: 16, fontWeight: "700", color: "#0A0F1E" },
+  saveButtonText: { fontSize: 16, fontWeight: "700" },
   cancelButton: { alignItems: "center", paddingVertical: 12 },
-  cancelButtonText: { fontSize: 15, color: "#718096" },
+  cancelButtonText: { fontSize: 15 },
 });
