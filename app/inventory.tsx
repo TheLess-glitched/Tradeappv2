@@ -1,5 +1,5 @@
-import { DrawerNavigationProp } from "@react-navigation/drawer";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router";
+import { DrawerNavigationProp } from "expo-router/drawer";
 import { AlertTriangle, ArrowLeft } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
