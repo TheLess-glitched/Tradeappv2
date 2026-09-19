@@ -48,6 +48,7 @@ export default function NewJobScreen() {
   const [service, setService] = useState("");
   const [price, setPrice] = useState("");
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>([]);
+  const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [cataloguePickerVisible, setCataloguePickerVisible] = useState(false);
   const [selectedCatalogueItem, setSelectedCatalogueItem] = useState<CatalogueItem | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -58,18 +59,23 @@ export default function NewJobScreen() {
 
   useEffect(() => {
     const loadCatalogueItems = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user?.id) return;
+      setCatalogueLoading(true);
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user?.id) return;
 
-      const { data } = await supabase
-        .from("catalogue")
-        .select("id, name, quantity, unit, selling_price, track_stock, reorder_level")
-        .eq("user_id", user.id)
-        .order("name", { ascending: true });
+        const { data } = await supabase
+          .from("catalogue")
+          .select("id, name, quantity, unit, selling_price, track_stock, reorder_level")
+          .eq("user_id", user.id)
+          .order("name", { ascending: true });
 
-      setCatalogueItems(data ?? []);
+        setCatalogueItems(data ?? []);
+      } finally {
+        setCatalogueLoading(false);
+      }
     };
 
     loadCatalogueItems();
@@ -224,7 +230,7 @@ export default function NewJobScreen() {
         date: autoDate,
         time: autoTime,
         notes: notes.trim(),
-        status: selectedCatalogueItem?.track_stock ? "done" : "pending",
+        status: "pending",
       })
       .select("id")
       .single();
@@ -237,6 +243,7 @@ export default function NewJobScreen() {
           "decrement_catalogue_stock",
           {
             p_catalogue_item_id: selectedCatalogueItem.id,
+            p_reason: "Job creation",
           },
         );
 
@@ -693,7 +700,9 @@ export default function NewJobScreen() {
                 <X size={20} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
-            {catalogueItems.length === 0 ? (
+            {catalogueLoading ? (
+              <ActivityIndicator color={colors.primary} style={{ paddingVertical: 32 }} />
+            ) : catalogueItems.length === 0 ? (
               <Text style={[styles.emptyPickerText, { color: colors.textMuted }]}>No catalogue items available.</Text>
             ) : (
               <FlatList
