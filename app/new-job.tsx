@@ -235,49 +235,9 @@ export default function NewJobScreen() {
       .select("id")
       .single();
 
-    let lowStockAlertMessage: string | null = null;
+    const lowStockAlertMessage: string | null = null;
 
-    if (!jobError && selectedCatalogueItem?.track_stock) {
-      try {
-        const { data: stockData, error: stockError } = await supabase.rpc(
-          "decrement_catalogue_stock",
-          {
-            p_catalogue_item_id: selectedCatalogueItem.id,
-            p_reason: "Job creation",
-          },
-        );
 
-        const stockResult = Array.isArray(stockData) ? stockData[0] : stockData;
-        const stockUpdated = stockResult?.updated;
-        const newQuantity =
-          stockResult?.new_quantity != null
-            ? Number(stockResult.new_quantity)
-            : null;
-        const reorderLevel = Number(
-          stockResult?.reorder_level ?? selectedCatalogueItem.reorder_level ?? 0,
-        );
-        const crossedThreshold = stockResult?.crossed_threshold === true;
-
-        if (stockError || stockUpdated !== true) {
-          Alert.alert(
-            "Stock update failed",
-            stockError?.message ??
-              "The job was saved, but the catalogue stock could not be updated.",
-          );
-        } else if (stockUpdated === true) {
-          if (
-            reorderLevel > 0 &&
-            newQuantity != null &&
-            newQuantity <= reorderLevel
-          ) {
-            if (crossedThreshold) {
-              lowStockAlertMessage = `${selectedCatalogueItem.name} just dropped to ${newQuantity} ${selectedCatalogueItem.unit} — at or below your reorder level of ${reorderLevel}.`;
-            }
-          }
-        }
-      } catch (rpcException) {
-      }
-    }
 
     // 4. Silently sync to Customers table
     if (shouldInsertCustomer && !jobError) {

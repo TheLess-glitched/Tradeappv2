@@ -7,11 +7,10 @@ import {
     Grid2x2,
     Menu,
     Moon,
-    Package,
     Plus,
     Settings,
     Shield,
-    Users,
+    ShoppingCart,
     X,
 } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -81,22 +80,16 @@ export default function CommandCenter() {
 
   const GRID_ITEMS = [
     {
-      label: "Jobs",
-      icon: <Briefcase size={24} color={colors.primary} />,
+      label: "New Job",
+      icon: <Plus size={24} color={colors.primary} />,
       color: colors.primary,
-      route: "/(tabs)/jobs",
+      route: "/new-job",
     },
     {
-      label: "Catalogue",
-      icon: <Package size={24} color={colors.statusDone} />,
+      label: "Sell",
+      icon: <ShoppingCart size={24} color={colors.statusDone} />,
       color: colors.statusDone,
-      route: "/(tabs)/catalogue",
-    },
-    {
-      label: "Customers",
-      icon: <Users size={24} color={colors.statusInProgress} />,
-      color: colors.statusInProgress,
-      route: "/(tabs)/customers",
+      route: "/quick-sell",
     },
     {
       label: "Inventory",
@@ -115,12 +108,6 @@ export default function CommandCenter() {
       icon: <Moon size={24} color={colors.secondary} />,
       color: colors.secondary,
       route: "/daily-close",
-    },
-    {
-      label: "New Job",
-      icon: <Plus size={24} color={colors.primary} />,
-      color: colors.primary,
-      route: "/new-job",
     },
     {
       label: "More",
