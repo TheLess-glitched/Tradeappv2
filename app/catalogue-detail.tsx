@@ -9,7 +9,6 @@ import {
 } from "lucide-react-native";
 import React, { useCallback, useRef, useState } from "react";
 import {
-    Alert,
     Modal,
     ScrollView,
     StyleSheet,
@@ -18,6 +17,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { showFeedback } from "../components/app-feedback";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
 import { supabase } from "../constants/supabase";
 import { useTheme } from "../context/theme-context";
@@ -155,7 +155,7 @@ export default function CatalogueDetailScreen() {
 
   const handleAddNote = async () => {
     if (!noteDesc.trim()) {
-      Alert.alert("Missing info", "Please enter a description.");
+      showFeedback("Missing info", "Please enter a description.");
       return;
     }
     const {
@@ -170,7 +170,7 @@ export default function CatalogueDetailScreen() {
       cost: noteCost ? parseFloat(noteCost) : null,
     });
     if (error) {
-      Alert.alert("Error", error.message);
+      showFeedback("Error", error.message);
       return;
     }
     resetNoteForm();
@@ -182,7 +182,7 @@ export default function CatalogueDetailScreen() {
     const qty = parseFloat(movQty);
 
     if (movType === "out" && qty > item.quantity) {
-      Alert.alert("Error", "Cannot remove more than current stock.");
+      showFeedback("Error", "Cannot remove more than current stock.");
       return;
     }
 
@@ -201,7 +201,7 @@ export default function CatalogueDetailScreen() {
       });
 
     if (movError) {
-      Alert.alert("Error", movError.message);
+      showFeedback("Error", movError.message);
       return;
     }
 
@@ -293,7 +293,7 @@ export default function CatalogueDetailScreen() {
         </Text>
         <TouchableOpacity
           onPress={() =>
-            Alert.alert("Edit Item", "Edit functionality coming soon.")
+            showFeedback("Edit Item", "Edit functionality coming soon.")
           }
         >
           <Pencil size={22} color={colors.textSecondary} />

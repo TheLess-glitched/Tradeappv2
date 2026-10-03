@@ -1,24 +1,25 @@
 import { X } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Modal,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { CURRENCIES } from "../constants/currency";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
+import { showDialog, showFeedback } from "./app-feedback";
 
 export type SellModalItem = {
   id: string;
   name: string;
   selling_price?: number | null;
+  cost_price?: number | null;
   [key: string]: any;
 };
 
@@ -29,6 +30,12 @@ interface SellModalProps {
   onComplete?: () => void;
 }
 
+type SaleDraft = {
+  itemId: string;
+  quantity: string;
+  price: string;
+};
+
 export default function SellModal({
   visible,
   item,
@@ -38,30 +45,53 @@ export default function SellModal({
   const { session } = useAuth();
   const { colors, currency } = useTheme();
 
-  const [quantity, setQuantity] = useState("1");
-  const [price, setPrice] = useState("");
+  const [saleDraft, setSaleDraft] = useState<SaleDraft | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (visible && item) {
-      setQuantity("1");
-      setPrice(item.selling_price != null ? item.selling_price.toString() : "");
-      setLoading(false);
-    }
-  }, [visible, item]);
+  const quantity =
+    saleDraft && saleDraft.itemId === item?.id ? saleDraft.quantity : "1";
+  const price =
+    saleDraft && saleDraft.itemId === item?.id
+      ? saleDraft.price
+      : item?.selling_price != null
+        ? item.selling_price.toString()
+        : "";
+
+  const updateSaleDraft = (
+    updates: Partial<Pick<SaleDraft, "quantity" | "price">>,
+  ) => {
+    if (!item) return;
+    setSaleDraft((current) => ({
+      itemId: item.id,
+      quantity: current?.itemId === item.id ? current.quantity : "1",
+      price:
+        current?.itemId === item.id
+          ? current.price
+          : item.selling_price != null
+            ? item.selling_price.toString()
+            : "",
+      ...updates,
+    }));
+  };
+
+  const handleClose = () => {
+    setSaleDraft(null);
+    setLoading(false);
+    onClose();
+  };
 
   const handleCompleteSale = async () => {
     if (!item) return;
 
     const parsedQty = parseInt(quantity.replace(/[^0-9]/g, ""), 10);
     if (!parsedQty || parsedQty <= 0) {
-      Alert.alert("Invalid quantity", "Please enter a valid quantity greater than 0.");
+      showFeedback("Invalid quantity", "Please enter a valid quantity greater than 0.");
       return;
     }
 
     const parsedPrice = parseFloat(price.replace(/[^0-9.]/g, "")) || 0;
     if (!parsedPrice || parsedPrice <= 0) {
-      Alert.alert("Invalid price", "Please enter a valid price greater than 0.");
+      showFeedback("Invalid price", "Please enter a valid price greater than 0.");
       return;
     }
 
@@ -77,7 +107,7 @@ export default function SellModal({
       );
 
       if (stockError) {
-        Alert.alert("Stock update failed", stockError.message);
+        showFeedback("Stock update failed", stockError.message);
         setLoading(false);
         return;
       }
@@ -91,9 +121,9 @@ export default function SellModal({
 
       if (!stockUpdated) {
         if (typeof newQuantity === "number" && !isNaN(newQuantity)) {
-          Alert.alert("Stock Error", `Only ${newQuantity} available`);
+          showFeedback("Stock Error", `Only ${newQuantity} available`);
         } else {
-          Alert.alert("Stock Error", "This item could not be found");
+          showFeedback("Stock Error", "This item could not be found");
         }
         setLoading(false);
         return;
@@ -118,13 +148,17 @@ export default function SellModal({
         customer_name: null,
         customer_phone: null,
         service: item.name,
+        quantity: parsedQty,
+        unit_price: parsedPrice,
+        unit_cost: item.cost_price ?? null,
+        catalogue_item_id: item.id,
         price: parsedPrice,
         date: autoDate,
         time: autoTime,
       });
 
       if (jobError) {
-        Alert.alert(
+        showDialog(
           "Sale not fully recorded",
           `Stock was already reduced by ${parsedQty}, but the sale record failed to save: ${jobError.message}. Please check the catalogue quantity and create the sale record manually if needed.`
         );
@@ -133,18 +167,18 @@ export default function SellModal({
         return;
       }
 
-      onClose();
+      handleClose();
       onComplete?.();
-      Alert.alert("Sale Complete", "Sale recorded successfully.");
+      showFeedback("Sale Complete", "Sale recorded successfully.");
     } catch (err: any) {
-      Alert.alert("Error", err?.message || "An unexpected error occurred.");
+      showFeedback("Error", err?.message || "An unexpected error occurred.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
       <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
         <View
           style={[
@@ -159,7 +193,7 @@ export default function SellModal({
             <Text style={[styles.modalTitle, { color: colors.text }]}>
               Sell — {item?.name}
             </Text>
-            <TouchableOpacity onPress={onClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <TouchableOpacity onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <X size={22} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -177,7 +211,7 @@ export default function SellModal({
             placeholder="1"
             placeholderTextColor={colors.placeholder}
             value={quantity}
-            onChangeText={setQuantity}
+            onChangeText={(value) => updateSaleDraft({ quantity: value })}
             keyboardType="numeric"
           />
 
@@ -196,7 +230,7 @@ export default function SellModal({
             placeholder="0"
             placeholderTextColor={colors.placeholder}
             value={price}
-            onChangeText={setPrice}
+            onChangeText={(value) => updateSaleDraft({ price: value })}
             keyboardType="numeric"
           />
 

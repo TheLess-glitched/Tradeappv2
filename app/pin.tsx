@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Crypto from "expo-crypto";
 import { router } from "expo-router";
 import { Delete } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
     StyleSheet,
     Text,
@@ -9,6 +10,7 @@ import {
     Vibration,
     View,
 } from "react-native";
+import { showFeedback } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
 import { useTheme } from "../context/theme-context";
 
@@ -19,8 +21,8 @@ export default function PinScreen() {
   const [mode, setMode] = useState<"enter" | "set" | "confirm">("enter");
   const [tempPin, setTempPin] = useState("");
   const [error, setError] = useState("");
-  const [pinKey, setPinKey] = useState("user_pin");
-  const [hasSetKey, setHasSetKey] = useState("has_set_pin");
+  const [userId, setUserId] = useState<string | null>(null);
+  const [pinHash, setPinHash] = useState<string | null>(null);
 
   useEffect(() => {
     checkMode();
@@ -30,24 +32,66 @@ export default function PinScreen() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    const key = user?.id ? `user_pin_${user.id}` : "user_pin";
-    const hsk = user?.id ? `has_set_pin_${user.id}` : "has_set_pin";
-    setPinKey(key);
-    setHasSetKey(hsk);
-
-    const hasSetPinEver = await AsyncStorage.getItem(hsk);
-    const existingPin = await AsyncStorage.getItem(key);
-
-    if (existingPin) {
-      setMode("enter");
-    } else if (hasSetPinEver === "true") {
-      // User logged out — PIN was cleared but they've set one before
-      setMode("enter");
-    } else {
-      // Brand new user
-      setMode("set");
+    if (!user) {
+      setError("Please sign in again.");
+      return;
     }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("pin_hash")
+      .eq("id", user.id)
+      .single();
+
+    if (profileError) {
+      setError("Unable to verify PIN. Please try again.");
+      return;
+    }
+
+    let accountPinHash = profile.pin_hash;
+    if (!accountPinHash) {
+      const legacyPin = await AsyncStorage.getItem(`user_pin_${user.id}`);
+      if (legacyPin) {
+        const migratedPinHash = await hashPin(legacyPin, user.id);
+        const { error: migrationError } = await supabase
+          .from("profiles")
+          .update({
+            pin_hash: migratedPinHash,
+            pin_set_at: new Date().toISOString(),
+          })
+          .eq("id", user.id)
+          .select("id")
+          .single();
+
+        if (migrationError) {
+          setError("Unable to migrate existing PIN. Please try again.");
+          return;
+        }
+        accountPinHash = migratedPinHash;
+      }
+    }
+
+    try {
+      await AsyncStorage.multiRemove([
+        `user_pin_${user.id}`,
+        `has_set_pin_${user.id}`,
+        "user_pin",
+        "has_set_pin",
+      ]);
+    } catch {
+      // Local PIN data is legacy cleanup only; the profile remains authoritative.
+    }
+
+    setUserId(user.id);
+  setPinHash(accountPinHash);
+  setMode(accountPinHash ? "enter" : "set");
   };
+
+  const hashPin = (value: string, accountId: string) =>
+    Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      `${accountId}:${value}`,
+    );
 
   const handleNumber = async (num: string) => {
     if (pin.length >= 6) return;
@@ -66,8 +110,29 @@ export default function PinScreen() {
       setPin("");
     } else if (mode === "confirm") {
       if (enteredPin === tempPin) {
-        await AsyncStorage.setItem(pinKey, enteredPin);
-        await AsyncStorage.setItem(hasSetKey, "true");
+        if (!userId) {
+          setError("Please sign in again.");
+          setPin("");
+          return;
+        }
+        const nextPinHash = await hashPin(enteredPin, userId);
+        const { error: saveError } = await supabase
+          .from("profiles")
+          .update({
+            pin_hash: nextPinHash,
+            pin_set_at: new Date().toISOString(),
+          })
+          .eq("id", userId)
+          .select("id")
+          .single();
+
+        if (saveError) {
+          setError("Could not save PIN. Please try again.");
+          setPin("");
+          return;
+        }
+
+        setPinHash(nextPinHash);
         setPinUnlocked(true);
         router.replace("/(tabs)/home");
       } else {
@@ -78,8 +143,13 @@ export default function PinScreen() {
         Vibration.vibrate(400);
       }
     } else {
-      const savedPin = await AsyncStorage.getItem(pinKey);
-      if (enteredPin === savedPin) {
+      if (!userId || !pinHash) {
+        setError("Unable to verify PIN. Please try again.");
+        setPin("");
+        return;
+      }
+      const enteredPinHash = await hashPin(enteredPin, userId);
+      if (enteredPinHash === pinHash) {
         setPinUnlocked(true);
         router.replace("/(tabs)/home");
       } else {
@@ -93,6 +163,21 @@ export default function PinScreen() {
   const handleDelete = () => {
     setPin(pin.slice(0, -1));
     setError("");
+  };
+
+  const handleSignOut = () => {
+    showFeedback("Log Out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Log Out",
+        style: "destructive",
+        onPress: async () => {
+          await supabase.auth.signOut();
+          setPinUnlocked(false);
+          router.replace("/" as any);
+        },
+      },
+    ]);
   };
 
   const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "del"];
@@ -161,6 +246,16 @@ export default function PinScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {mode === "enter" ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={handleSignOut}
+          style={styles.signOutButton}
+        >
+          <Text style={[styles.signOutText, { color: colors.textSecondary }]}>Sign Out</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -210,4 +305,6 @@ const styles = StyleSheet.create({
   },
   keyEmpty: { backgroundColor: "transparent", borderWidth: 0 },
   keyText: { fontSize: 24, fontWeight: "600" },
+  signOutButton: { marginTop: 20, padding: 8 },
+  signOutText: { fontSize: 14, fontWeight: "600" },
 });

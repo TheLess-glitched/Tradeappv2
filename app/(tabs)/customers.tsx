@@ -3,7 +3,6 @@ import { MessageCircle, Phone } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Linking,
     Modal,
@@ -13,6 +12,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { showFeedback } from "../../components/app-feedback";
 import { normalizePhone } from "../../constants/phone";
 import { supabase } from "../../constants/supabase";
 import { ThemeColors } from "../../constants/theme";
@@ -94,7 +94,7 @@ export default function CustomersScreen() {
     const trimmedPhone = normalizePhone(phone, defaultCountryCode);
 
     if (!trimmedName || !trimmedPhone) {
-      Alert.alert("Invalid phone", "Enter a valid phone number.");
+      showFeedback("Invalid phone", "Enter a valid phone number.");
       return;
     }
     setSaving(true);
@@ -112,7 +112,7 @@ export default function CustomersScreen() {
 
       setSaving(false);
       if (error) {
-        Alert.alert("Error", error.message);
+        showFeedback("Error", error.message);
         return;
       }
 
@@ -133,7 +133,7 @@ export default function CustomersScreen() {
 
     if (lookupError) {
       setSaving(false);
-      Alert.alert("Error", lookupError.message);
+      showFeedback("Error", lookupError.message);
       return;
     }
 
@@ -152,7 +152,7 @@ export default function CustomersScreen() {
       return;
     }
 
-    Alert.alert(
+    showFeedback(
       `A customer named ${existingCustomer.name} already uses this number. What would you like to do?`,
       undefined,
       [
@@ -174,7 +174,7 @@ export default function CustomersScreen() {
   const handleImportFromContacts = async () => {
     const { status } = await Contacts.requestPermissionsAsync();
     if (status !== Contacts.PermissionStatus.GRANTED) {
-      Alert.alert(
+      showFeedback(
         "Contacts permission needed",
         "TradeApp needs contacts access to import a customer's name and phone number.",
         [
@@ -190,7 +190,7 @@ export default function CustomersScreen() {
 
     const contactPhone = contact.phoneNumbers?.[0]?.number?.trim();
     if (!contact.name?.trim() || !contactPhone) {
-      Alert.alert(
+      showFeedback(
         "No phone number found",
         "The selected contact does not have a phone number to import.",
       );

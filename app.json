@@ -14,7 +14,9 @@
       "package": "com.theless.app",
       "versionCode": 1,
       "permissions": [
-        "READ_CONTACTS"
+        "READ_CONTACTS",
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS"
       ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -60,7 +62,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "201cf2e5-49c6-42e5-a11c-863e8fe10daf"
+        "projectId": "9dcc8272-990b-49da-be1a-62b6158c50c4"
       }
     }
   }

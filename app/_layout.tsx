@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { Linking, View } from "react-native";
+import { AppFeedbackProvider } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
 import { AuthProvider } from "../context/auth-context";
 import { ThemeProvider, useTheme } from "../context/theme-context";
@@ -57,7 +58,9 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <ThemeProvider>
-        <RootNavigator />
+        <AppFeedbackProvider>
+          <RootNavigator />
+        </AppFeedbackProvider>
       </ThemeProvider>
     </AuthProvider>
   );

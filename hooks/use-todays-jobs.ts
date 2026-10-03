@@ -1,18 +1,19 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { supabase } from "../constants/supabase";
+import type { RevenueRecord } from "./revenue-metrics";
+import { calculateRevenueMetrics } from "./revenue-metrics";
+export { getJobProfit } from "./revenue-metrics";
 
-export type TodayJob = {
+export type TodayRecord = RevenueRecord & {
   id: number;
   customer_name: string | null;
   service: string;
-  price: number;
-  status: string;
   created_at: string;
 };
 
 export function useTodaysJobs() {
-  const [jobs, setJobs] = useState<TodayJob[]>([]);
+  const [records, setRecords] = useState<TodayRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const hasDataRef = useRef(false);
 
@@ -35,14 +36,14 @@ export function useTodaysJobs() {
 
       const { data, error } = await supabase
         .from("jobs")
-        .select("*")
+        .select("id, customer_name, service, record_type, line_total, quantity, unit_price, unit_cost, status, created_at")
         .eq("user_id", user?.id)
         .gte("created_at", startOfDay.toISOString())
         .lte("created_at", endOfDay.toISOString())
         .order("created_at", { ascending: false });
 
       if (!error && data) {
-        setJobs(data);
+        setRecords(data);
         hasDataRef.current = data.length > 0;
       }
     } catch {
@@ -58,18 +59,28 @@ export function useTodaysJobs() {
     }, [fetchTodayJobs]),
   );
 
-  const totalRevenue = jobs.reduce((sum, job) => sum + (job.price || 0), 0);
-  const completedJobs = jobs.filter((j) => j.status === "done");
-  const inProgressJobs = jobs.filter((j) => j.status === "in_progress");
-  const unfinishedJobs = jobs.filter((j) => j.status !== "done");
+  const jobs = records.filter((record) => record.record_type === "job");
+  const sales = records.filter((record) => record.record_type === "sale");
+  const revenueMetrics = calculateRevenueMetrics(jobs, sales);
+  const pendingJobs = jobs.filter((job) => job.status === "pending").length;
+  const inProgressJobs = jobs.filter((job) => job.status === "in_progress").length;
+  const completedJobs = jobs.filter((job) => job.status === "done").length;
+  const unfinishedJobs = jobs.filter((job) => job.status !== "done");
+  const unitsSold = sales.reduce((sum, sale) => sum + sale.quantity, 0);
 
   return {
     jobs,
+    sales,
     loading,
     refetch: fetchTodayJobs,
-    totalRevenue,
-    completedJobs: completedJobs.length,
-    inProgressJobs: inProgressJobs.length,
+    ...revenueMetrics,
+    jobsCount: jobs.length,
+    salesCount: sales.length,
+    unitsSold,
+    hasUnknownCostSales: revenueMetrics.unknownCostSalesCount > 0,
+    pendingJobs,
+    completedJobs,
+    inProgressJobs,
     unfinishedJobs,
     unfinishedCount: unfinishedJobs.length,
   };

@@ -11,7 +11,6 @@ import {
 import React, { useCallback, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     Modal,
     ScrollView,
@@ -21,6 +20,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { showFeedback } from "../../components/app-feedback";
 import { CURRENCIES, formatCurrency } from "../../constants/currency";
 import { supabase } from "../../constants/supabase";
 import { useAuth } from "../../context/auth-context";
@@ -108,7 +108,7 @@ export default function CatalogueScreen() {
 
   const handleSave = async () => {
     if (!name.trim() || !quantity) {
-      Alert.alert("Missing info", "Please enter a name and quantity.");
+      showFeedback("Missing info", "Please enter a name and quantity.");
       return;
     }
     const {
@@ -133,7 +133,7 @@ export default function CatalogueScreen() {
         })
         .eq("id", editingItem.id);
       if (error) {
-        Alert.alert("Error", error.message);
+        showFeedback("Error", error.message);
         return;
       }
     } else {
@@ -151,7 +151,7 @@ export default function CatalogueScreen() {
         location,
       });
       if (error) {
-        Alert.alert("Error", error.message);
+        showFeedback("Error", error.message);
         return;
       }
     }
@@ -164,7 +164,7 @@ export default function CatalogueScreen() {
     const qty = parseFloat(movementQty);
 
     if (movementType === "out" && qty > selectedItem.quantity) {
-      Alert.alert("Error", "Cannot remove more than current stock.");
+      showFeedback("Error", "Cannot remove more than current stock.");
       return;
     }
 
@@ -183,7 +183,7 @@ export default function CatalogueScreen() {
       });
 
     if (movError) {
-      Alert.alert("Error", movError.message);
+      showFeedback("Error", movError.message);
       return;
     }
 
@@ -209,7 +209,7 @@ export default function CatalogueScreen() {
   };
 
   const handleDelete = (id: string) => {
-    Alert.alert("Delete Item", "Are you sure you want to delete this item?", [
+    showFeedback("Delete Item", "Are you sure you want to delete this item?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",

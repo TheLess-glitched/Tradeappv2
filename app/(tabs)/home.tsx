@@ -4,18 +4,15 @@ import {
     Briefcase,
     FileText,
     FlaskConical,
-    Grid2x2,
     Menu,
-    Moon,
     Plus,
     Settings,
     Shield,
     ShoppingCart,
     X,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-    Alert,
     Animated,
     Dimensions,
     FlatList,
@@ -28,11 +25,14 @@ import {
     TouchableWithoutFeedback,
     View,
 } from "react-native";
+import { showFeedback } from "../../components/app-feedback";
+import StatCard from "../../components/stat-card";
 import { formatCurrency } from "../../constants/currency";
 import { supabase } from "../../constants/supabase";
 import { getStatusStyle } from "../../constants/theme";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
+import { useTodaysJobs } from "../../hooks/use-todays-jobs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
@@ -41,9 +41,10 @@ type Job = {
   id: number;
   customer_name: string | null;
   service: string;
+  record_type: "job" | "sale";
   status: "pending" | "in_progress" | "done";
   time: string;
-  price: number;
+  line_total: number | null;
 };
 
 type NotificationItem = {
@@ -60,21 +61,23 @@ type NotificationItem = {
 const STATUS_LABELS = {
   pending: "Pending",
   in_progress: "In Progress",
-  done: "Done",
+  done: "Completed",
 };
 
 export default function CommandCenter() {
   const { colors, currency } = useTheme();
   const { session, isSessionReady } = useAuth();
+  const { totalRevenue } = useTodaysJobs();
 
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [totalRevenue, setTotalRevenue] = useState(0);
   const [loading, setLoading] = useState(true);
   const hasDataRef = useRef(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifModalOpen, setNotifModalOpen] = useState(false);
   const hasNotifsRef = useRef(false);
+  const isCheckingRemindersRef = useRef(false);
+  const handledReminderIdsRef = useRef<Set<number>>(new Set());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerAnim] = useState(new Animated.Value(-DRAWER_WIDTH));
 
@@ -103,18 +106,6 @@ export default function CommandCenter() {
       color: colors.statusInProgress,
       route: "/notes",
     },
-    {
-      label: "Daily Close",
-      icon: <Moon size={24} color={colors.secondary} />,
-      color: colors.secondary,
-      route: "/daily-close",
-    },
-    {
-      label: "More",
-      icon: <Grid2x2 size={24} color={colors.textSecondary} />,
-      color: colors.textSecondary,
-      route: "/(tabs)/more",
-    },
   ];
 
   const fetchJobs = useCallback(async () => {
@@ -125,7 +116,7 @@ export default function CommandCenter() {
     try {
       const { data, error } = await supabase
         .from("jobs")
-        .select("*")
+        .select("id, customer_name, service, record_type, status, time, line_total")
         .eq("user_id", session?.user?.id)
         .order("created_at", { ascending: false })
         .limit(2);
@@ -142,36 +133,105 @@ export default function CommandCenter() {
     }
   }, [session?.user?.id]);
 
-  const fetchTodayRevenue = useCallback(async () => {
-    if (!isSessionReady || !session?.user?.id) {
-      setTotalRevenue(0);
-      return;
+  const handleOpenNotifications = useCallback(async () => {
+    setNotifModalOpen(true);
+    if (unreadCount > 0 && session?.user?.id) {
+      setUnreadCount(0);
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+
+      try {
+        await supabase
+          .from("notifications")
+          .update({ is_read: true })
+          .eq("user_id", session.user.id)
+          .eq("is_read", false);
+      } catch {
+      }
     }
+  }, [session?.user?.id, unreadCount]);
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date();
-    endOfDay.setHours(23, 59, 59, 999);
-
-    try {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select("price, status")
-        .eq("user_id", session.user.id)
-        .gte("created_at", startOfDay.toISOString())
-        .lte("created_at", endOfDay.toISOString());
-
-      if (error) throw error;
-
-      setTotalRevenue(
-        (data ?? [])
-          .filter((job) => job.status === "done")
-          .reduce((sum, job) => sum + (job.price || 0), 0),
+  const markRemindersAsRead = useCallback(
+    async (reminderIds: number[]) => {
+      if (reminderIds.length === 0 || !session?.user?.id) return;
+      const idSet = new Set(reminderIds);
+      setNotifications((prev) =>
+        prev.map((n) => (idSet.has(n.id) ? { ...n, is_read: true } : n)),
       );
-    } catch {
-      setTotalRevenue(0);
-    }
-  }, [isSessionReady, session?.user?.id]);
+      setUnreadCount((prev) => Math.max(0, prev - reminderIds.length));
+
+      try {
+        await supabase
+          .from("notifications")
+          .update({ is_read: true })
+          .eq("user_id", session.user.id)
+          .in("id", reminderIds);
+      } catch {
+      }
+    },
+    [session?.user?.id],
+  );
+
+  const checkUnreadDeadlineReminders = useCallback(
+    (items: NotificationItem[]) => {
+      if (isCheckingRemindersRef.current) return;
+
+      const unreadReminders = items.filter(
+        (n) =>
+          !n.is_read &&
+          !handledReminderIdsRef.current.has(n.id) &&
+          (n.type === "deadline_approaching" || n.type === "job_overdue"),
+      );
+
+      if (unreadReminders.length === 0) return;
+
+      isCheckingRemindersRef.current = true;
+      unreadReminders.forEach((r) => handledReminderIdsRef.current.add(r.id));
+      const reminderIds = unreadReminders.map((r) => r.id);
+
+      const title =
+        unreadReminders.length === 1
+          ? unreadReminders[0].title
+          : `You have ${unreadReminders.length} job reminders`;
+
+      const message =
+        unreadReminders.length === 1
+          ? unreadReminders[0].message
+          : unreadReminders.length === 2
+            ? `• ${unreadReminders[0].title}: ${unreadReminders[0].message}\n• ${unreadReminders[1].title}: ${unreadReminders[1].message}`
+            : `• ${unreadReminders[0].title}: ${unreadReminders[0].message}\n• ${unreadReminders[1].title}: ${unreadReminders[1].message}\n\n+${unreadReminders.length - 2} more`;
+
+      showFeedback(
+        title,
+        message,
+        [
+          {
+            text: "Dismiss",
+            style: "cancel",
+            onPress: () => {
+              isCheckingRemindersRef.current = false;
+              markRemindersAsRead(reminderIds);
+            },
+          },
+          {
+            text: "View",
+            onPress: () => {
+              isCheckingRemindersRef.current = false;
+              markRemindersAsRead(reminderIds);
+              handleOpenNotifications();
+            },
+          },
+        ],
+        {
+          cancelable: true,
+          onDismiss: () => {
+            isCheckingRemindersRef.current = false;
+            markRemindersAsRead(reminderIds);
+          },
+        },
+      );
+    },
+    [handleOpenNotifications, markRemindersAsRead],
+  );
 
   const fetchNotifications = useCallback(async () => {
     if (!session?.user?.id) {
@@ -193,13 +253,14 @@ export default function CommandCenter() {
       setNotifications(items);
       setUnreadCount(items.filter((n) => !n.is_read).length);
       hasNotifsRef.current = items.length > 0;
+      checkUnreadDeadlineReminders(items);
     } catch {
       if (!hasNotifsRef.current) {
         setNotifications([]);
         setUnreadCount(0);
       }
     }
-  }, [session?.user?.id]);
+  }, [session?.user?.id, checkUnreadDeadlineReminders]);
 
   useFocusEffect(
     useCallback(() => {
@@ -208,35 +269,16 @@ export default function CommandCenter() {
       }
 
       fetchJobs();
-      fetchTodayRevenue();
       fetchNotifications();
-    }, [fetchJobs, fetchTodayRevenue, fetchNotifications, isSessionReady, session?.user?.id]),
+    }, [fetchJobs, fetchNotifications, isSessionReady, session?.user?.id]),
   );
 
   useEffect(() => {
     if (isSessionReady && session?.user?.id) {
       fetchJobs();
-      fetchTodayRevenue();
       fetchNotifications();
     }
-  }, [isSessionReady, session?.user?.id, fetchJobs, fetchTodayRevenue, fetchNotifications]);
-
-  const handleOpenNotifications = async () => {
-    setNotifModalOpen(true);
-    if (unreadCount > 0 && session?.user?.id) {
-      setUnreadCount(0);
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-
-      try {
-        await supabase
-          .from("notifications")
-          .update({ is_read: true })
-          .eq("user_id", session.user.id)
-          .eq("is_read", false);
-      } catch {
-      }
-    }
-  };
+  }, [isSessionReady, session?.user?.id, fetchJobs, fetchNotifications]);
 
   const openDrawer = () => {
     setDrawerOpen(true);
@@ -255,7 +297,9 @@ export default function CommandCenter() {
     }).start(() => setDrawerOpen(false));
   };
 
-  const openJobs = jobs.filter((j) => j.status !== "done").length;
+  const openJobs = jobs.filter(
+    (record) => record.record_type === "job" && record.status !== "done",
+  ).length;
   const hour = new Date().getHours();
   const greeting =
     hour < 12
@@ -308,39 +352,31 @@ export default function CommandCenter() {
       >
         {/* Stat Cards */}
         <View style={styles.statsRow}>
-          <TouchableOpacity
-            style={[styles.statCard, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+          <StatCard
+            label="Revenue Today"
+            value={formatCurrency(totalRevenue, currency)}
+            colors={colors}
+            backgroundColor={colors.primary}
+            borderColor={colors.primary}
+            labelColor={colors.primaryText}
+            valueColor={colors.primaryText}
+            subtitle="Tap for today's summary & Close Day"
+            subtitleColor={colors.primaryText}
+            subtitleFontSize={13}
+            subtitleLineHeight={18}
+            subtitleNumberOfLines={2}
+            subtitleAdjustsFontSizeToFit={false}
+            minHeight={116}
+            onPress={() => router.push("/daily-close" as any)}
+          />
+          <StatCard
+            label="Open Jobs"
+            value={openJobs}
+            colors={colors}
+            backgroundColor={colors.surface}
+            subtitle={`${jobs.length} recent records`}
             onPress={() => router.push("/(tabs)/jobs" as any)}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.statValueAccent, { color: colors.primaryText }]}>
-              {formatCurrency(totalRevenue > 0 ? totalRevenue : 0, currency)}
-            </Text>
-            <Text style={[styles.statLabelAccent, { color: colors.primaryText, opacity: 0.85 }]}>
-              Revenue Today
-            </Text>
-            <Text style={[styles.statSubAccent, { color: colors.primaryText, opacity: 0.7 }]}>
-              Tap to view jobs
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.statCard,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={() => router.push("/(tabs)/jobs" as any)}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.statValue, { color: colors.text }]}>{openJobs}</Text>
-            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Open Jobs</Text>
-            <Text style={[styles.statSub, { color: colors.textSecondary }]}>
-              {jobs.length} recent
-            </Text>
-          </TouchableOpacity>
+          />
         </View>
 
         {/* Quick Actions Grid */}
@@ -352,7 +388,7 @@ export default function CommandCenter() {
               style={styles.gridItem}
               onPress={() => {
                 if (!item.route) {
-                  Alert.alert(
+                  showFeedback(
                     "Coming Soon",
                     "This feature will be available after launch. Stay tuned!",
                   );
@@ -380,12 +416,17 @@ export default function CommandCenter() {
           ))}
         </View>
 
-        {/* Recent Jobs */}
+        {/* Recent Activity */}
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Jobs</Text>
-          <TouchableOpacity onPress={() => router.push("/(tabs)/jobs" as any)}>
-            <Text style={[styles.seeAll, { color: colors.primary }]}>See all</Text>
-          </TouchableOpacity>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent Activity</Text>
+          <View style={styles.activityLinks}>
+            <TouchableOpacity onPress={() => router.push("/(tabs)/jobs" as any)}>
+              <Text style={[styles.seeAll, { color: colors.primary }]}>Jobs</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push("/(tabs)/sales" as any)}>
+              <Text style={[styles.seeAll, { color: colors.primary }]}>Sales</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {loading ? (
@@ -411,9 +452,9 @@ export default function CommandCenter() {
             <View style={[styles.emptyIconWrap, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
               <Briefcase size={24} color={colors.primary} />
             </View>
-            <Text style={[styles.emptyText, { color: colors.text }]}>No jobs yet</Text>
+            <Text style={[styles.emptyText, { color: colors.text }]}>No activity yet</Text>
             <Text style={[styles.emptySubText, { color: colors.textMuted }]}>
-              Tap &quot;New Job&quot; to add your first one
+              Add a job or record a sale to get started
             </Text>
           </View>
         ) : (
@@ -427,7 +468,10 @@ export default function CommandCenter() {
             ]}
           >
             {jobs.map((job) => {
-              const statusStyles = getStatusStyle(colors, job.status);
+              const statusStyles = getStatusStyle(
+                colors,
+                job.record_type === "sale" ? "done" : job.status,
+              );
 
               return (
                 <TouchableOpacity
@@ -436,7 +480,13 @@ export default function CommandCenter() {
                     styles.jobItem,
                     { borderBottomColor: colors.border },
                   ]}
-                  onPress={() => router.push("/(tabs)/jobs" as any)}
+                  onPress={() =>
+                    router.push(
+                      job.record_type === "sale"
+                        ? ("/(tabs)/sales" as any)
+                        : ("/(tabs)/jobs" as any),
+                    )
+                  }
                   activeOpacity={0.7}
                 >
                   <View style={styles.jobLeft}>
@@ -468,7 +518,9 @@ export default function CommandCenter() {
                           { color: statusStyles.text },
                         ]}
                       >
-                        {STATUS_LABELS[job.status] ?? job.status}
+                        {job.record_type === "sale"
+                          ? "Sold"
+                          : STATUS_LABELS[job.status] ?? job.status}
                       </Text>
                     </View>
                     <Text style={[styles.jobTime, { color: colors.textSecondary }]}>
@@ -536,7 +588,7 @@ export default function CommandCenter() {
                 closeDrawer();
                 setTimeout(
                   () =>
-                    Alert.alert(
+                    showFeedback(
                       "Privacy Policy",
                       "Privacy policy page coming soon.",
                     ),
@@ -677,18 +729,6 @@ const styles = StyleSheet.create({
   },
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },
   statsRow: { flexDirection: "row", gap: 12, marginBottom: 24 },
-  statCard: {
-    flex: 1,
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-  },
-  statValue: { fontSize: 22, fontWeight: "800" },
-  statValueAccent: { fontSize: 22, fontWeight: "800" },
-  statLabel: { fontSize: 12, marginTop: 2 },
-  statLabelAccent: { fontSize: 12, marginTop: 2, fontWeight: "600" },
-  statSub: { fontSize: 11, marginTop: 4 },
-  statSubAccent: { fontSize: 11, marginTop: 4 },
   sectionTitle: {
     fontSize: 16,
     fontWeight: "700",
@@ -701,9 +741,10 @@ const styles = StyleSheet.create({
     marginTop: 24,
     marginBottom: 12,
   },
+  activityLinks: { flexDirection: "row", gap: 16 },
   seeAll: { fontSize: 13, fontWeight: "600" },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  gridItem: { width: "22%", alignItems: "center" },
+  gridItem: { width: "46%", alignItems: "center" },
   gridIconBox: {
     width: 56,
     height: 56,

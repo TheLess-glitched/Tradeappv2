@@ -9,10 +9,9 @@ import {
     Smartphone,
     Sun,
 } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Modal,
     ScrollView,
     StyleSheet,
@@ -21,6 +20,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { showFeedback } from "../components/app-feedback";
 import { CURRENCIES, CurrencyCode, DEFAULT_CURRENCY } from "../constants/currency";
 import { DEFAULT_COUNTRY_CODE } from "../constants/phone";
 import { supabase } from "../constants/supabase";
@@ -86,11 +86,11 @@ export default function SettingsScreen() {
     );
     await setDefaultCountryCode(countryCode);
     setSaving(false);
-    Alert.alert("Saved", "Your settings have been updated.");
+    showFeedback("Saved", "Your settings have been updated.");
   };
 
   const handleChangePin = async () => {
-    Alert.alert(
+    showFeedback(
       "Change PIN",
       "This will ask you to set a new PIN on the next screen.",
       [
@@ -101,10 +101,15 @@ export default function SettingsScreen() {
             const {
               data: { user: currentUser },
             } = await supabase.auth.getUser();
-            const key = currentUser?.id
-              ? `user_pin_${currentUser.id}`
-              : "user_pin";
-            await AsyncStorage.removeItem(key);
+            if (!currentUser) return;
+            const { error } = await supabase
+              .from("profiles")
+              .update({ pin_hash: null, pin_set_at: null })
+              .eq("id", currentUser.id);
+            if (error) {
+              showFeedback("Error", error.message);
+              return;
+            }
             router.replace("/pin" as any);
           },
         },
@@ -113,7 +118,7 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = async () => {
-    Alert.alert("Log Out", "Are you sure you want to log out?", [
+    showFeedback("Log Out", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Log Out",

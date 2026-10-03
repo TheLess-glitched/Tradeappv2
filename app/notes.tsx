@@ -9,7 +9,6 @@ import {
 } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
-  Alert,
   FlatList,
   Modal,
   ScrollView,
@@ -19,6 +18,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { showFeedback } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
 import { useTheme } from "../context/theme-context";
 
@@ -75,7 +75,7 @@ export default function NotesScreen() {
 
   const handleSave = async () => {
     if (!title.trim()) {
-      Alert.alert("Missing info", "Please enter a title.");
+      showFeedback("Missing info", "Please enter a title.");
       return;
     }
     const {
@@ -98,7 +98,7 @@ export default function NotesScreen() {
         })
         .eq("id", editingNote.id);
       if (error) {
-        Alert.alert("Error", error.message);
+        showFeedback("Error", error.message);
         return;
       }
     } else {
@@ -106,7 +106,7 @@ export default function NotesScreen() {
         .from("general_notes")
         .insert({ user_id: user?.id, title, body, category, tags });
       if (error) {
-        Alert.alert("Error", error.message);
+        showFeedback("Error", error.message);
         return;
       }
     }
@@ -116,7 +116,7 @@ export default function NotesScreen() {
   };
 
   const handleDelete = (id: string) => {
-    Alert.alert("Delete Note", "Are you sure you want to delete this note?", [
+    showFeedback("Delete Note", "Are you sure you want to delete this note?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",

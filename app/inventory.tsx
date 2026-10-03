@@ -4,7 +4,6 @@ import { AlertTriangle, ArrowLeft } from "lucide-react-native";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Modal,
     ScrollView,
     StyleSheet,
@@ -13,6 +12,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { showFeedback } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
 import { useTheme } from "../context/theme-context";
 
@@ -57,7 +57,7 @@ export default function InventoryScreen() {
 
   const handleAdd = async () => {
     if (!name || !quantity) {
-      Alert.alert("Missing info", "Please enter item name and quantity.");
+      showFeedback("Missing info", "Please enter item name and quantity.");
       return;
     }
     setSaving(true);
@@ -73,7 +73,7 @@ export default function InventoryScreen() {
     });
     setSaving(false);
     if (error) {
-      Alert.alert("Error", error.message);
+      showFeedback("Error", error.message);
     } else {
       setName("");
       setQuantity("");
@@ -87,7 +87,7 @@ export default function InventoryScreen() {
   const adjustQuantity = (item: Item, change: number) => {
     const newQty = item.quantity + change;
     if (newQty < 0) return;
-    Alert.alert(
+    showFeedback(
       "Update Stock",
       `Set ${item.name} to ${newQty} ${item.unit || "units"}?`,
       [
@@ -100,7 +100,7 @@ export default function InventoryScreen() {
               .update({ quantity: newQty })
               .eq("id", item.id);
             if (error) {
-              Alert.alert("Error", error.message);
+              showFeedback("Error", error.message);
             } else {
               fetchItems();
             }
@@ -111,7 +111,7 @@ export default function InventoryScreen() {
   };
 
   const deleteItem = (id: number, itemName: string) => {
-    Alert.alert("Delete Item", `Remove "${itemName}" from inventory?`, [
+    showFeedback("Delete Item", `Remove "${itemName}" from inventory?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -122,7 +122,7 @@ export default function InventoryScreen() {
             .delete()
             .eq("id", id);
           if (error) {
-            Alert.alert("Error", error.message);
+            showFeedback("Error", error.message);
           } else {
             fetchItems();
           }

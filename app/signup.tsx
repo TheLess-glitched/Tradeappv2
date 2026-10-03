@@ -2,7 +2,6 @@ import { router } from "expo-router";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
@@ -11,6 +10,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { showFeedback } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
 import { useTheme } from "../context/theme-context";
 
@@ -24,15 +24,15 @@ export default function SignupScreen() {
 
   const handleSignup = async () => {
     if (!email || !password || !confirmPassword) {
-      Alert.alert("Missing info", "Please fill in all fields.");
+      showFeedback("Missing info", "Please fill in all fields.");
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert("Password mismatch", "Passwords do not match.");
+      showFeedback("Password mismatch", "Passwords do not match.");
       return;
     }
     if (password.length < 6) {
-      Alert.alert("Weak password", "Password must be at least 6 characters.");
+      showFeedback("Weak password", "Password must be at least 6 characters.");
       return;
     }
     setLoading(true);
@@ -45,9 +45,9 @@ export default function SignupScreen() {
     });
     setLoading(false);
     if (error) {
-      Alert.alert("Signup failed", error.message);
+      showFeedback("Signup failed", error.message);
     } else {
-      Alert.alert(
+      showFeedback(
         "Check your email",
         "We sent a confirmation link to " +
           email +

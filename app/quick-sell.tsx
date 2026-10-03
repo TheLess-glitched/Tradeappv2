@@ -1,16 +1,16 @@
 import { router, useFocusEffect } from "expo-router";
 import { ArrowLeft, Search, ShoppingCart, X } from "lucide-react-native";
-import React, { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import SellModal, { SellModalItem } from "../components/sell-modal";
 import { formatCurrency } from "../constants/currency";
@@ -22,6 +22,7 @@ type TrackedCatalogueItem = {
   id: string;
   name: string;
   selling_price: number | null;
+  cost_price: number | null;
   quantity: number;
   unit: string;
   reorder_level: number;
@@ -50,7 +51,7 @@ export default function QuickSellScreen() {
 
       const { data, error } = await supabase
         .from("catalogue")
-        .select("id, name, selling_price, quantity, unit, reorder_level, track_stock")
+        .select("id, name, selling_price, cost_price, quantity, unit, reorder_level, track_stock")
         .eq("user_id", userId)
         .eq("track_stock", true)
         .order("name", { ascending: true });

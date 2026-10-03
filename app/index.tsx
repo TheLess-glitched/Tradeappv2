@@ -2,7 +2,6 @@ import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
@@ -11,6 +10,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { showFeedback } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
@@ -41,7 +41,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Missing info", "Please enter your email and password.");
+      showFeedback("Missing info", "Please enter your email and password.");
       return;
     }
     setLoading(true);
@@ -51,7 +51,7 @@ export default function LoginScreen() {
     });
     setLoading(false);
     if (error) {
-      Alert.alert("Login failed", error.message);
+      showFeedback("Login failed", error.message);
     } else {
       router.replace("/pin" as any);
     }

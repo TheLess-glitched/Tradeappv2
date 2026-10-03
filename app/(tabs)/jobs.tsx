@@ -7,9 +7,8 @@ import {
     FileText,
     Square,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-    Alert,
     FlatList,
     Linking,
     Modal,
@@ -18,6 +17,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { showFeedback } from "../../components/app-feedback";
 import { formatCurrency } from "../../constants/currency";
 import { supabase } from "../../constants/supabase";
 import { getStatusStyle, ThemeColors } from "../../constants/theme";
@@ -29,7 +29,8 @@ type Job = {
   customer_name: string | null;
   customer_phone?: string | null;
   service: string;
-  price: number;
+  record_type: "job";
+  line_total: number | null;
   date: string;
   time: string;
   notes: string;
@@ -40,7 +41,7 @@ type Job = {
 const STATUS_LABELS = {
   pending: "Pending",
   in_progress: "In Progress",
-  done: "Done",
+  done: "Completed",
 };
 
 function FilterHeader({
@@ -76,6 +77,9 @@ function FilterHeader({
                   fontWeight: isActive ? "700" : "500",
                 },
               ]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.65}
             >
               {status === "all" ? "All" : STATUS_LABELS[status]}
             </Text>
@@ -114,8 +118,9 @@ export default function JobsScreen() {
     try {
       const { data, error } = await supabase
         .from("jobs")
-        .select("*")
+        .select("id, customer_name, customer_phone, service, record_type, line_total, date, time, notes, status, created_at")
         .eq("user_id", session?.user?.id)
+        .eq("record_type", "job")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -152,7 +157,7 @@ export default function JobsScreen() {
     }
 
     const completedJob = jobs.find((job) => String(job.id) === completedJobId);
-    if (completedJob?.status === "done") {
+    if (completedJob?.record_type === "job" && completedJob.status === "done") {
       lastPromptedIdRef.current = completedJobId;
       setJobToComplete(completedJob);
       setConfirmModal(true);
@@ -166,24 +171,30 @@ export default function JobsScreen() {
     const { error } = await supabase
       .from("jobs")
       .update({ status: newStatus })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("user_id", session?.user?.id)
+      .eq("record_type", "job");
     if (error) {
-      Alert.alert("Error", error.message);
+      showFeedback("Error", error.message);
     } else {
       fetchJobs();
     }
   };
 
   const deleteJob = (id: number) => {
-    Alert.alert("Delete Job", "Are you sure you want to delete this job?", [
+    showFeedback("Delete Job", "Are you sure you want to delete this job?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          const { error } = await supabase.from("jobs").delete().eq("id", id);
+          const { error } = await supabase
+            .from("jobs")
+            .delete()
+            .eq("id", id)
+            .eq("user_id", session?.user?.id);
           if (error) {
-            Alert.alert("Error", error.message);
+            showFeedback("Error", error.message);
           } else {
             fetchJobs();
           }
@@ -193,13 +204,15 @@ export default function JobsScreen() {
   };
 
   const cycleStatus = async (job: Job) => {
+    if (job.record_type !== "job") return;
+
     // Only pending and in_progress jobs can be updated; done jobs are finalized
     if (job.status === "done") {
       return;
     }
 
     if (job.status === "pending") {
-      Alert.alert(
+      showFeedback(
         "Update Status",
         'Change status to "In Progress"?',
         [
@@ -258,7 +271,7 @@ export default function JobsScreen() {
 
       // 3. Check if phone number is completely missing
       if (!phoneToText) {
-        Alert.alert(
+        showFeedback(
           "Missing Phone Number",
           `No phone number found for ${customerDisplayName}. Could not send message.`,
         );
@@ -280,7 +293,7 @@ export default function JobsScreen() {
           await Linking.openURL(smsUrl);
         }
       } catch {
-        Alert.alert(
+        showFeedback(
           "Error",
           `Could not open ${method === "whatsapp" ? "WhatsApp" : "SMS app"}.`,
         );
@@ -292,7 +305,7 @@ export default function JobsScreen() {
   };
 
   const filtered =
-    filter === "all" ? jobs : jobs.filter((j) => j.status === filter);
+    filter === "all" ? jobs : jobs.filter((job) => job.status === filter);
 
   const renderFilterHeader = useCallback(
     () => (
@@ -328,7 +341,7 @@ export default function JobsScreen() {
             </Text>
           </View>
           <Text style={[styles.jobPrice, { color: colors.text }]}>
-            {formatCurrency(job.price || 0, currency)}
+            {formatCurrency(job.line_total ?? 0, currency)}
           </Text>
         </View>
 
@@ -383,7 +396,7 @@ export default function JobsScreen() {
                   { color: statusStyles.text },
                 ]}
               >
-                Done
+                Completed
               </Text>
             </View>
           ) : (
@@ -427,7 +440,7 @@ export default function JobsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>All Jobs</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Jobs</Text>
         <TouchableOpacity
           style={[styles.addButton, { backgroundColor: colors.primary }]}
           onPress={() => router.push("/new-job" as any)}
@@ -465,9 +478,9 @@ export default function JobsScreen() {
               <View style={[styles.emptyIconWrap, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
                 <FileText size={24} color={colors.primary} />
               </View>
-              <Text style={[styles.emptyText, { color: colors.text }]}>No jobs yet</Text>
+              <Text style={[styles.emptyText, { color: colors.text }]}>No records found</Text>
               <Text style={[styles.emptySubText, { color: colors.textMuted }]}>
-                Tap + New to add your first job
+                Try another filter or add a job or sale
               </Text>
             </View>
           )}
