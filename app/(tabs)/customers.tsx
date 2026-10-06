@@ -1,6 +1,7 @@
-import * as Contacts from "expo-contacts";
+import * as Contacts from "expo-contacts/legacy";
+import { useFocusEffect } from "expo-router";
 import { MessageCircle, Phone } from "lucide-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
@@ -16,6 +17,7 @@ import { showFeedback } from "../../components/app-feedback";
 import { normalizePhone } from "../../constants/phone";
 import { supabase } from "../../constants/supabase";
 import { ThemeColors } from "../../constants/theme";
+import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
 
 type Customer = {
@@ -56,6 +58,7 @@ function SearchHeader({
 }
 
 export default function CustomersScreen() {
+  const { businessId } = useAuth();
   const { colors, defaultCountryCode } = useTheme();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -71,23 +74,27 @@ export default function CustomersScreen() {
   searchRef.current = search;
   colorsRef.current = colors;
 
-  useEffect(() => {
-    fetchCustomers();
-  }, []);
-
-  const fetchCustomers = async () => {
+  const fetchCustomers = useCallback(async () => {
     setLoading(true);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      setCustomers([]);
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from("customers")
       .select("*")
-      .eq("user_id", user?.id)
+      .eq("business_id", businessId)
       .order("created_at", { ascending: false });
     if (!error && data) setCustomers(data);
     setLoading(false);
-  };
+  }, [businessId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchCustomers();
+    }, [fetchCustomers]),
+  );
 
   const handleAddCustomer = async () => {
     const trimmedName = name.trim();
@@ -98,13 +105,16 @@ export default function CustomersScreen() {
       return;
     }
     setSaving(true);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      setSaving(false);
+      showFeedback("Error", "No active business is available.");
+      return;
+    }
 
     const insertCustomer = async () => {
       const { error } = await supabase.from("customers").insert({
-        user_id: user?.id,
+        user_id: businessId,
+        business_id: businessId,
         name: trimmedName,
         phone: trimmedPhone,
         service_type: serviceType,
@@ -126,7 +136,7 @@ export default function CustomersScreen() {
     const { data: existingCustomer, error: lookupError } = await supabase
       .from("customers")
       .select("id, name")
-      .eq("user_id", user?.id)
+      .eq("business_id", businessId)
       .eq("phone", trimmedPhone)
       .limit(1)
       .maybeSingle();

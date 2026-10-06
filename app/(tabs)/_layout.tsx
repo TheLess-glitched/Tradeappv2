@@ -1,10 +1,21 @@
 import { Tabs } from "expo-router";
 import { Briefcase, Home, Package, ShoppingCart, Users } from "lucide-react-native";
 import React from "react";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
 
 export default function TabLayout() {
   const { colors } = useTheme();
+  const { isSessionReady, isBusinessReady } = useAuth();
+
+  if (!isSessionReady || !isBusinessReady) {
+    return (
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <Tabs
@@ -67,3 +78,11 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  centerContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

@@ -163,6 +163,14 @@ export default function SignupScreen() {
             <Text style={[styles.loginLink, { color: colors.primary }]}>Sign in</Text>
           </TouchableOpacity>
         </View>
+
+        <View style={styles.joinRow}>
+          <TouchableOpacity onPress={() => router.push("/join-business" as any)}>
+            <Text style={[styles.loginLink, { color: colors.primary }]}>
+              Join a business
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -246,5 +254,9 @@ const styles = StyleSheet.create({
   loginLink: {
     fontSize: 14,
     fontWeight: "600",
+  },
+  joinRow: {
+    alignItems: "center",
+    marginTop: 20,
   },
 });

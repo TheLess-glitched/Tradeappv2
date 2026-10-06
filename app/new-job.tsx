@@ -1,24 +1,25 @@
 import { router } from "expo-router";
 import { Calendar, Check, ChevronDown, Clock, Search, X } from "lucide-react-native";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import { COUNTRIES, Country, DEFAULT_COUNTRY } from "../constants/countries";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
 import { normalizePhone } from "../constants/phone";
 import { supabase } from "../constants/supabase";
+import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 type CatalogueItem = {
@@ -38,6 +39,7 @@ type Customer = {
 };
 
 export default function NewJobScreen() {
+  const { businessId } = useAuth();
   const { colors, currency, defaultCountryCode } = useTheme();
 
   const [customerName, setCustomerName] = useState("");
@@ -115,15 +117,15 @@ export default function NewJobScreen() {
     const loadCatalogueItems = async () => {
       setCatalogueLoading(true);
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user?.id) return;
+        if (!businessId) {
+          setCatalogueItems([]);
+          return;
+        }
 
         const { data } = await supabase
           .from("catalogue")
           .select("id, name, quantity, unit, selling_price, track_stock, reorder_level")
-          .eq("user_id", user.id)
+          .eq("business_id", businessId)
           .order("name", { ascending: true });
 
         setCatalogueItems(data ?? []);
@@ -135,19 +137,19 @@ export default function NewJobScreen() {
     loadCatalogueItems();
 
     const loadCustomers = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user?.id) return;
+      if (!businessId) {
+        setCustomers([]);
+        return;
+      }
       const { data } = await supabase
         .from("customers")
         .select("id, name, phone")
-        .eq("user_id", user.id)
+        .eq("business_id", businessId)
         .order("name", { ascending: true });
       setCustomers(data ?? []);
     };
     loadCustomers();
-  }, []);
+  }, [businessId]);
 
   const filteredCountries = useMemo(() => {
     if (!searchQuery.trim()) return COUNTRIES;
@@ -197,9 +199,11 @@ export default function NewJobScreen() {
 
     setLoading(true);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      setLoading(false);
+      showFeedback("Error", "No active business is available.");
+      return;
+    }
 
     const trimmedCustomerName = customerName.trim();
 
@@ -223,7 +227,7 @@ export default function NewJobScreen() {
       const { data: existingCustomer, error: lookupError } = await supabase
         .from("customers")
         .select("id, name")
-        .eq("user_id", user?.id)
+        .eq("business_id", businessId)
         .eq("phone", formattedPhone)
         .limit(1)
         .maybeSingle();
@@ -258,31 +262,16 @@ export default function NewJobScreen() {
       }
     }
 
-    // 2. Auto-generate local Date and Time at the exact moment user saves
-    const now = new Date();
-    const day = String(now.getDate()).padStart(2, "0");
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const year = now.getFullYear();
-    const autoDate = `${day}/${month}/${year}`;
-
-    let hours = now.getHours();
-    const minutes = String(now.getMinutes()).padStart(2, "0");
-    const ampm = hours >= 12 ? "PM" : "AM";
-    hours = hours % 12;
-    hours = hours ? hours : 12;
-    const autoTime = `${hours}:${minutes} ${ampm}`;
-
-    // 3. Insert the Job with customer_phone saved directly
+    // Insert the Job with customer_phone saved directly
     const { data: createdJob, error: jobError } = await supabase
       .from("jobs")
       .insert({
-        user_id: user?.id,
+        user_id: businessId,
+        business_id: businessId,
         customer_name: customerName.trim() || null,
         customer_phone: formattedPhone || null,
         service: service.trim(),
         price: parseInt(price.replace(/[^0-9]/g, ""), 10) || 0,
-        date: autoDate,
-        time: autoTime,
         estimated_finish_at: estimatedFinishAt
           ? estimatedFinishAt.toISOString()
           : null,
@@ -299,7 +288,8 @@ export default function NewJobScreen() {
     // 4. Silently sync to Customers table
     if (shouldInsertCustomer && !jobError) {
       await supabase.from("customers").insert({
-        user_id: user?.id,
+        user_id: businessId,
+        business_id: businessId,
         name: trimmedCustomerName,
         phone: formattedPhone,
         service_type: service.trim(),

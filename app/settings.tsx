@@ -9,7 +9,7 @@ import {
     Smartphone,
     Sun,
 } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Modal,
@@ -25,9 +25,12 @@ import { CURRENCIES, CurrencyCode, DEFAULT_CURRENCY } from "../constants/currenc
 import { DEFAULT_COUNTRY_CODE } from "../constants/phone";
 import { supabase } from "../constants/supabase";
 import { ThemeMode } from "../constants/theme";
+import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 export default function SettingsScreen() {
+  const { role } = useAuth();
+  const isOwner = role === "owner";
   const { colors, isDark, themeMode, setThemeMode, setPinUnlocked, currency, setCurrency, defaultCountryCode, setDefaultCountryCode } = useTheme();
 
   const [businessName, setBusinessName] = useState("");
@@ -42,11 +45,7 @@ export default function SettingsScreen() {
   const [userEmail, setUserEmail] = useState("");
   const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -69,7 +68,12 @@ export default function SettingsScreen() {
       setCountryCode(parsed.default_country_code || DEFAULT_COUNTRY_CODE);
     }
     setLoading(false);
-  };
+  }, [setCurrency]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => void loadSettings(), 0);
+    return () => clearTimeout(timer);
+  }, [loadSettings]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -110,6 +114,7 @@ export default function SettingsScreen() {
               showFeedback("Error", error.message);
               return;
             }
+            setPinUnlocked(false);
             router.replace("/pin" as any);
           },
         },
@@ -124,7 +129,12 @@ export default function SettingsScreen() {
         text: "Log Out",
         style: "destructive",
         onPress: async () => {
-          await supabase.auth.signOut();
+          const { error } = await supabase.auth.signOut();
+          if (error) {
+            showFeedback("Error", error.message);
+            return;
+          }
+          setPinUnlocked(false);
           router.replace("/" as any);
         },
       },
@@ -179,39 +189,41 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        <View
-          style={[
-            styles.accountCard,
-            {
-              backgroundColor: colors.surface,
-              borderColor: colors.border,
-            },
-          ]}
-        >
+        {isOwner ? (
           <View
             style={[
-              styles.accountAvatar,
-              { backgroundColor: colors.primary },
+              styles.accountCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
             ]}
           >
-            <Text
+            <View
               style={[
-                styles.accountAvatarText,
-                { color: colors.primaryText },
+                styles.accountAvatar,
+                { backgroundColor: colors.primary },
               ]}
             >
-              {businessName ? businessName.charAt(0).toUpperCase() : "T"}
-            </Text>
+              <Text
+                style={[
+                  styles.accountAvatarText,
+                  { color: colors.primaryText },
+                ]}
+              >
+                {businessName ? businessName.charAt(0).toUpperCase() : "T"}
+              </Text>
+            </View>
+            <View>
+              <Text style={[styles.accountName, { color: colors.text }]}>
+                {businessName || "Your Business"}
+              </Text>
+              <Text style={[styles.accountEmail, { color: colors.textMuted }]}>
+                {userEmail}
+              </Text>
+            </View>
           </View>
-          <View>
-            <Text style={[styles.accountName, { color: colors.text }]}>
-              {businessName || "Your Business"}
-            </Text>
-            <Text style={[styles.accountEmail, { color: colors.textMuted }]}>
-              {userEmail}
-            </Text>
-          </View>
-        </View>
+        ) : null}
 
         {/* Appearance / Theme Selector */}
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
@@ -276,6 +288,7 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {isOwner ? <>
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
           Currency
         </Text>
@@ -326,7 +339,9 @@ export default function SettingsScreen() {
             })}
           </View>
         </View>
+        </> : null}
 
+        {isOwner ? <>
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
           Business Details
         </Text>
@@ -453,6 +468,7 @@ export default function SettingsScreen() {
             </Text>
           )}
         </TouchableOpacity>
+        </> : null}
 
         <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
           Security

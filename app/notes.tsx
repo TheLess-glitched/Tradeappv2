@@ -1,25 +1,26 @@
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import {
-  ArrowLeft,
-  FileText,
-  Plus,
-  Search,
-  Trash2,
-  X,
+    ArrowLeft,
+    FileText,
+    Plus,
+    Search,
+    Trash2,
+    X,
 } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
-  FlatList,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    FlatList,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
+import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 type Note = {
@@ -32,6 +33,7 @@ type Note = {
 };
 
 export default function NotesScreen() {
+  const { businessId } = useAuth();
   const { colors } = useTheme();
 
   const [notes, setNotes] = useState<Note[]>([]);
@@ -55,32 +57,37 @@ export default function NotesScreen() {
     "Finance",
   ];
 
-  useEffect(() => {
-    fetchNotes();
-  }, []);
-
-  const fetchNotes = async () => {
+  const fetchNotes = useCallback(async () => {
     setLoading(true);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      setNotes([]);
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from("general_notes")
       .select("*")
-      .eq("user_id", user?.id)
+      .eq("business_id", businessId)
       .order("created_at", { ascending: false });
     if (!error && data) setNotes(data);
     setLoading(false);
-  };
+  }, [businessId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchNotes();
+    }, [fetchNotes]),
+  );
 
   const handleSave = async () => {
     if (!title.trim()) {
       showFeedback("Missing info", "Please enter a title.");
       return;
     }
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      showFeedback("Error", "No active business is available.");
+      return;
+    }
     const tags = tagsInput
       .split(",")
       .map((t) => t.trim())
@@ -94,7 +101,6 @@ export default function NotesScreen() {
           body,
           category,
           tags,
-          updated_at: new Date().toISOString(),
         })
         .eq("id", editingNote.id);
       if (error) {
@@ -102,9 +108,19 @@ export default function NotesScreen() {
         return;
       }
     } else {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       const { error } = await supabase
         .from("general_notes")
-        .insert({ user_id: user?.id, title, body, category, tags });
+        .insert({
+          user_id: user?.id,
+          business_id: businessId,
+          title,
+          body,
+          category,
+          tags,
+        });
       if (error) {
         showFeedback("Error", error.message);
         return;

@@ -17,8 +17,10 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { showFeedback } from "../../components/app-feedback";
+import { showFeedback, showToast } from "../../components/app-feedback";
+import VoidRecordDialog from "../../components/void-record-dialog";
 import { formatCurrency } from "../../constants/currency";
+import { normalizePhone } from "../../constants/phone";
 import { supabase } from "../../constants/supabase";
 import { getStatusStyle, ThemeColors } from "../../constants/theme";
 import { useAuth } from "../../context/auth-context";
@@ -36,6 +38,10 @@ type Job = {
   notes: string;
   status: "pending" | "in_progress" | "done";
   created_at: string;
+  created_by: string | null;
+  created_by_name: string | null;
+  voided_at: string | null;
+  void_reason: string | null;
 };
 
 const STATUS_LABELS = {
@@ -48,14 +54,19 @@ function FilterHeader({
   colors,
   filter,
   onFilterChange,
+  isOwner,
 }: {
   colors: ThemeColors;
-  filter: "all" | "pending" | "in_progress" | "done";
-  onFilterChange: (value: "all" | "pending" | "in_progress" | "done") => void;
+  filter: "all" | "pending" | "in_progress" | "done" | "voided";
+  onFilterChange: (value: "all" | "pending" | "in_progress" | "done" | "voided") => void;
+  isOwner: boolean;
 }) {
   return (
     <View style={styles.filterRow}>
-      {(["all", "pending", "in_progress", "done"] as const).map((status) => {
+      {(isOwner
+        ? (["all", "pending", "in_progress", "done", "voided"] as const)
+        : (["all", "pending", "in_progress", "done"] as const)
+      ).map((status) => {
         const isActive = filter === status;
         return (
           <TouchableOpacity
@@ -81,7 +92,7 @@ function FilterHeader({
               adjustsFontSizeToFit
               minimumFontScale={0.65}
             >
-              {status === "all" ? "All" : STATUS_LABELS[status]}
+              {status === "all" ? "All" : status === "voided" ? "Voided" : STATUS_LABELS[status]}
             </Text>
           </TouchableOpacity>
         );
@@ -92,17 +103,20 @@ function FilterHeader({
 
 export default function JobsScreen() {
   const { colors, currency } = useTheme();
-  const { session, isSessionReady } = useAuth();
+  const { session, isSessionReady, businessId, role } = useAuth();
+  const isOwner = role === "owner";
+  const isWorker = role === "worker";
   const { completedJobId } = useLocalSearchParams<{ completedJobId?: string }>();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const hasDataRef = useRef(false);
   const [filter, setFilter] = useState<
-    "all" | "pending" | "in_progress" | "done"
+    "all" | "pending" | "in_progress" | "done" | "voided"
   >("all");
   const [confirmModal, setConfirmModal] = useState(false);
   const [jobToComplete, setJobToComplete] = useState<Job | null>(null);
+  const [jobToVoid, setJobToVoid] = useState<Job | null>(null);
   const [dontAskAgain, setDontAskAgain] = useState(false);
   const lastPromptedIdRef = useRef<string | null>(null);
   const filterRef = useRef(filter);
@@ -118,8 +132,8 @@ export default function JobsScreen() {
     try {
       const { data, error } = await supabase
         .from("jobs")
-        .select("id, customer_name, customer_phone, service, record_type, line_total, date, time, notes, status, created_at")
-        .eq("user_id", session?.user?.id)
+        .select("id, customer_name, customer_phone, service, record_type, line_total, date, time, notes, status, created_at, created_by, created_by_name, voided_at, void_reason")
+        .eq("business_id", businessId)
         .eq("record_type", "job")
         .order("created_at", { ascending: false });
 
@@ -133,7 +147,7 @@ export default function JobsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [session?.user?.id]);
+  }, [businessId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -151,18 +165,60 @@ export default function JobsScreen() {
     }
   }, [isSessionReady, session?.user?.id, fetchJobs]);
 
+  const getUsablePhoneForJob = useCallback(
+    async (job: Job): Promise<string | null> => {
+      if (job.customer_phone) {
+        const normalized = normalizePhone(job.customer_phone);
+        if (normalized) return normalized;
+      }
+
+      if (job.customer_name?.trim()) {
+        try {
+          const { data: customerData } = await supabase
+            .from("customers")
+            .select("phone")
+            .eq("name", job.customer_name.trim())
+            .eq("business_id", businessId)
+            .limit(1)
+            .maybeSingle();
+
+          if (customerData?.phone) {
+            const normalized = normalizePhone(customerData.phone);
+            if (normalized) return normalized;
+          }
+        } catch {
+          // Fallback if lookup encounters any issue
+        }
+      }
+
+      return null;
+    },
+    [businessId],
+  );
+
   useEffect(() => {
     if (!completedJobId || lastPromptedIdRef.current === completedJobId) {
       return;
     }
 
     const completedJob = jobs.find((job) => String(job.id) === completedJobId);
-    if (completedJob?.record_type === "job" && completedJob.status === "done") {
+    if (
+      completedJob?.record_type === "job" &&
+      completedJob.status === "done" &&
+      !completedJob.voided_at
+    ) {
       lastPromptedIdRef.current = completedJobId;
-      setJobToComplete(completedJob);
-      setConfirmModal(true);
+      getUsablePhoneForJob(completedJob).then((usablePhone) => {
+        if (usablePhone) {
+          setJobToComplete({
+            ...completedJob,
+            customer_phone: usablePhone,
+          });
+          setConfirmModal(true);
+        }
+      });
     }
-  }, [completedJobId, jobs]);
+  }, [completedJobId, jobs, getUsablePhoneForJob]);
 
   const updateStatus = async (
     id: number,
@@ -172,39 +228,20 @@ export default function JobsScreen() {
       .from("jobs")
       .update({ status: newStatus })
       .eq("id", id)
-      .eq("user_id", session?.user?.id)
-      .eq("record_type", "job");
+      .eq("business_id", businessId)
+      .eq("record_type", "job")
+      .is("voided_at", null);
     if (error) {
       showFeedback("Error", error.message);
+      return false;
     } else {
       fetchJobs();
+      return true;
     }
   };
 
-  const deleteJob = (id: number) => {
-    showFeedback("Delete Job", "Are you sure you want to delete this job?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          const { error } = await supabase
-            .from("jobs")
-            .delete()
-            .eq("id", id)
-            .eq("user_id", session?.user?.id);
-          if (error) {
-            showFeedback("Error", error.message);
-          } else {
-            fetchJobs();
-          }
-        },
-      },
-    ]);
-  };
-
   const cycleStatus = async (job: Job) => {
-    if (job.record_type !== "job") return;
+    if (job.record_type !== "job" || job.voided_at) return;
 
     // Only pending and in_progress jobs can be updated; done jobs are finalized
     if (job.status === "done") {
@@ -224,16 +261,33 @@ export default function JobsScreen() {
         ],
       );
     } else if (job.status === "in_progress") {
-      // Open modal to choose messaging option to finalize
-      setJobToComplete(job);
-      setConfirmModal(true);
+      const usablePhone = await getUsablePhoneForJob(job);
+      if (!usablePhone) {
+        const success = await updateStatus(job.id, "done");
+        if (success) {
+          showToast("Job marked as completed");
+        }
+      } else {
+        setJobToComplete({
+          ...job,
+          customer_phone: usablePhone,
+        });
+        setConfirmModal(true);
+      }
     }
   };
 
   const finalizeJob = async (job: Job, method: "sms" | "whatsapp" | "none") => {
-    await updateStatus(job.id, "done");
+    const success = await updateStatus(job.id, "done");
+    if (!success) {
+      setConfirmModal(false);
+      setJobToComplete(null);
+      return;
+    }
 
-    if (method !== "none") {
+    if (method === "none") {
+      showToast("Job marked as completed");
+    } else {
       const savedSettings = await AsyncStorage.getItem("business_settings");
       let template = "Hi {name}, your job is completed and ready!";
       if (savedSettings) {
@@ -249,28 +303,9 @@ export default function JobsScreen() {
       const customerDisplayName = job.customer_name || "Walk-in Customer";
       const personalizedMessage = template.replace("{name}", customerDisplayName);
 
-      // 1. Read phone number directly from the job object
-      let phoneToText = "";
-      if (job.customer_phone) {
-        phoneToText = job.customer_phone.replace(/\D/g, "");
-      }
+      const usablePhone = await getUsablePhoneForJob(job);
 
-      // 2. Fallback to customers table only if necessary
-      if (!phoneToText && job.customer_name) {
-        const { data: customerData } = await supabase
-          .from("customers")
-          .select("phone")
-          .eq("name", job.customer_name)
-          .limit(1)
-          .single();
-
-        if (customerData?.phone) {
-          phoneToText = customerData.phone.replace(/\D/g, "");
-        }
-      }
-
-      // 3. Check if phone number is completely missing
-      if (!phoneToText) {
+      if (!usablePhone) {
         showFeedback(
           "Missing Phone Number",
           `No phone number found for ${customerDisplayName}. Could not send message.`,
@@ -280,8 +315,7 @@ export default function JobsScreen() {
         return;
       }
 
-      // 4. Format phone number (convert legacy leading 0 to 234, otherwise keep saved international number)
-      const cleanNumber = phoneToText.replace(/\D/g, "");
+      const cleanNumber = usablePhone.replace(/\D/g, "");
 
       try {
         if (method === "whatsapp") {
@@ -304,8 +338,11 @@ export default function JobsScreen() {
     setJobToComplete(null);
   };
 
-  const filtered =
-    filter === "all" ? jobs : jobs.filter((job) => job.status === filter);
+  const filtered = jobs.filter((job) =>
+    filter === "voided"
+      ? job.voided_at != null
+      : !job.voided_at && (filter === "all" || job.status === filter),
+  );
 
   const renderFilterHeader = useCallback(
     () => (
@@ -313,18 +350,21 @@ export default function JobsScreen() {
         colors={colorsRef.current}
         filter={filterRef.current}
         onFilterChange={setFilter}
+        isOwner={isOwner}
       />
     ),
-    [],
+    [isOwner],
   );
 
   const renderJobItem = useCallback(({ item: job }: { item: Job }) => {
+    const isVoided = job.voided_at != null;
     const statusStyles = getStatusStyle(colors, job.status);
 
     return (
       <View
         style={[
           styles.jobCard,
+          isVoided && styles.voidedCard,
           {
             backgroundColor: colors.surface,
             borderColor: colors.border,
@@ -340,7 +380,13 @@ export default function JobsScreen() {
               {job.service}
             </Text>
           </View>
-          <Text style={[styles.jobPrice, { color: colors.text }]}>
+          <Text
+            style={[
+              styles.jobPrice,
+              isVoided && styles.voidedAmount,
+              { color: colors.text },
+            ]}
+          >
             {formatCurrency(job.line_total ?? 0, currency)}
           </Text>
         </View>
@@ -373,10 +419,32 @@ export default function JobsScreen() {
               </Text>
             </View>
           ) : null}
+          {isOwner && job.created_by_name ? (
+            <Text style={[styles.jobMetaText, { color: colors.textMuted }]}>
+              by {job.created_by_name}
+            </Text>
+          ) : null}
+          {isVoided ? (
+            <>
+              <View style={styles.metaRow}>
+                <Clock size={13} color={colors.textMuted} />
+                <Text style={[styles.jobMetaText, { color: colors.textMuted }]}>
+                  Voided {new Date(job.voided_at!).toLocaleString()}
+                </Text>
+              </View>
+              <Text style={[styles.voidReason, { color: colors.textMuted }]}>
+                Reason: {job.void_reason}
+              </Text>
+            </>
+          ) : null}
         </View>
 
         <View style={styles.jobFooter}>
-          {job.status === "done" ? (
+          {isVoided ? (
+            <View style={[styles.statusBadge, { backgroundColor: colors.surfaceSubtle }]}>
+              <Text style={[styles.statusText, { color: colors.textMuted }]}>Voided</Text>
+            </View>
+          ) : job.status === "done" ? (
             <View
               style={[
                 styles.statusBadge,
@@ -399,7 +467,7 @@ export default function JobsScreen() {
                 Completed
               </Text>
             </View>
-          ) : (
+          ) : !isWorker || job.created_by === session?.user?.id ? (
             <TouchableOpacity
               style={[
                 styles.statusBadge,
@@ -424,18 +492,27 @@ export default function JobsScreen() {
                 {STATUS_LABELS[job.status]}
               </Text>
             </TouchableOpacity>
+          ) : (
+            <View style={[styles.statusBadge, { backgroundColor: statusStyles.badgeBg }]}>
+              <View style={[styles.statusDot, { backgroundColor: statusStyles.dot }]} />
+              <Text style={[styles.statusText, { color: statusStyles.text }]}>
+                {STATUS_LABELS[job.status]}
+              </Text>
+            </View>
           )}
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => deleteJob(job.id)}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Text style={[styles.deleteText, { color: colors.danger }]}>Delete</Text>
-          </TouchableOpacity>
+          {isOwner && !isVoided ? (
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => setJobToVoid(job)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={[styles.deleteText, { color: colors.danger }]}>Void</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     );
-  }, [colors, cycleStatus, deleteJob]);
+  }, [colors, currency, cycleStatus, isOwner, isWorker, session?.user?.id]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -586,6 +663,43 @@ export default function JobsScreen() {
           </View>
         </View>
       </Modal>
+      {isOwner ? <VoidRecordDialog
+        visible={jobToVoid != null}
+        recordLabel="job"
+        userId={session?.user?.id ?? null}
+        onCancel={() => setJobToVoid(null)}
+        onConfirm={async (reason) => {
+          if (!jobToVoid) return true;
+          try {
+            const { data, error } = await supabase.rpc("void_job", {
+              p_job_id: jobToVoid.id,
+              p_reason: reason,
+            });
+            if (error) {
+              showToast("Void failed", error.message);
+              return false;
+            }
+            const result = Array.isArray(data) ? data[0] : data;
+            if (!result || typeof result.voided !== "boolean") {
+              showToast("Void failed", "The server returned an invalid result.");
+              return false;
+            }
+            if (result.voided === false) {
+              showToast("Already voided", "This job has already been voided.");
+            } else {
+              showToast("Job voided", "The job remains in your voided records.");
+            }
+            await fetchJobs();
+            return true;
+          } catch (error) {
+            showToast(
+              "Void failed",
+              error instanceof Error ? error.message : "Please try again.",
+            );
+            return false;
+          }
+        }}
+      /> : null}
     </View>
   );
 }
@@ -628,6 +742,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
   },
+  voidedCard: { opacity: 0.58 },
   jobTop: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -638,9 +753,11 @@ const styles = StyleSheet.create({
   jobCustomer: { fontSize: 15, fontWeight: "700" },
   jobService: { fontSize: 13, marginTop: 2 },
   jobPrice: { fontSize: 16, fontWeight: "800" },
+  voidedAmount: { textDecorationLine: "line-through" },
   jobMeta: { gap: 6, marginBottom: 12 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   jobMetaText: { fontSize: 12 },
+  voidReason: { fontSize: 12, fontStyle: "italic" },
   jobFooter: {
     flexDirection: "row",
     alignItems: "center",

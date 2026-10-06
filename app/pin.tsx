@@ -1,8 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Crypto from "expo-crypto";
 import { router } from "expo-router";
 import { Delete } from "lucide-react-native";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     StyleSheet,
     Text,
@@ -11,11 +10,14 @@ import {
     View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
+import { hashAccountPin, verifyAccountPin } from "../constants/account-pin";
 import { supabase } from "../constants/supabase";
+import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 export default function PinScreen() {
   const { colors, setPinUnlocked } = useTheme();
+  const { role, isBusinessReady, businessError } = useAuth();
 
   const [pin, setPin] = useState("");
   const [mode, setMode] = useState<"enter" | "set" | "confirm">("enter");
@@ -24,11 +26,7 @@ export default function PinScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [pinHash, setPinHash] = useState<string | null>(null);
 
-  useEffect(() => {
-    checkMode();
-  }, []);
-
-  const checkMode = async () => {
+  const checkMode = useCallback(async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -52,7 +50,7 @@ export default function PinScreen() {
     if (!accountPinHash) {
       const legacyPin = await AsyncStorage.getItem(`user_pin_${user.id}`);
       if (legacyPin) {
-        const migratedPinHash = await hashPin(legacyPin, user.id);
+        const migratedPinHash = await hashAccountPin(legacyPin, user.id);
         const { error: migrationError } = await supabase
           .from("profiles")
           .update({
@@ -85,13 +83,12 @@ export default function PinScreen() {
     setUserId(user.id);
   setPinHash(accountPinHash);
   setMode(accountPinHash ? "enter" : "set");
-  };
+  }, []);
 
-  const hashPin = (value: string, accountId: string) =>
-    Crypto.digestStringAsync(
-      Crypto.CryptoDigestAlgorithm.SHA256,
-      `${accountId}:${value}`,
-    );
+  useEffect(() => {
+    const timer = setTimeout(() => void checkMode(), 0);
+    return () => clearTimeout(timer);
+  }, [checkMode]);
 
   const handleNumber = async (num: string) => {
     if (pin.length >= 6) return;
@@ -101,6 +98,18 @@ export default function PinScreen() {
     if (newPin.length === 6) {
       await processPin(newPin);
     }
+  };
+
+  const navigateAfterPin = () => {
+    if (role === null) {
+      router.replace(
+        isBusinessReady && !businessError
+          ? ("/no-business" as any)
+          : ("/" as any),
+      );
+      return;
+    }
+    router.replace("/(tabs)/home");
   };
 
   const processPin = async (enteredPin: string) => {
@@ -115,7 +124,7 @@ export default function PinScreen() {
           setPin("");
           return;
         }
-        const nextPinHash = await hashPin(enteredPin, userId);
+        const nextPinHash = await hashAccountPin(enteredPin, userId);
         const { error: saveError } = await supabase
           .from("profiles")
           .update({
@@ -133,8 +142,8 @@ export default function PinScreen() {
         }
 
         setPinHash(nextPinHash);
-        setPinUnlocked(true);
-        router.replace("/(tabs)/home");
+        setPinUnlocked(true, userId);
+        navigateAfterPin();
       } else {
         setError("PINs don't match. Try again.");
         setPin("");
@@ -148,10 +157,9 @@ export default function PinScreen() {
         setPin("");
         return;
       }
-      const enteredPinHash = await hashPin(enteredPin, userId);
-      if (enteredPinHash === pinHash) {
-        setPinUnlocked(true);
-        router.replace("/(tabs)/home");
+      if (await verifyAccountPin(enteredPin, userId, pinHash)) {
+        setPinUnlocked(true, userId);
+        navigateAfterPin();
       } else {
         setError("Incorrect PIN");
         setPin("");

@@ -1,7 +1,7 @@
-import { useNavigation } from "expo-router";
+import { useFocusEffect, useNavigation } from "expo-router";
 import { DrawerNavigationProp } from "expo-router/drawer";
 import { AlertTriangle, ArrowLeft } from "lucide-react-native";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     Modal,
@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
+import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 type Item = {
@@ -25,6 +26,8 @@ type Item = {
 };
 
 export default function InventoryScreen() {
+  const { businessId, session, role } = useAuth();
+  const isOwner = role === "owner";
   const { colors } = useTheme();
 
   const [items, setItems] = useState<Item[]>([]);
@@ -37,23 +40,27 @@ export default function InventoryScreen() {
   const [lowStockAlert, setLowStockAlert] = useState("5");
   const navigation = useNavigation<DrawerNavigationProp<any>>();
 
-  useEffect(() => {
-    fetchItems();
-  }, []);
-
-  const fetchItems = async () => {
+  const fetchItems = useCallback(async () => {
     setLoading(true);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from("inventory")
       .select("*")
-      .eq("user_id", user?.id)
+      .eq("business_id", businessId)
       .order("name", { ascending: true });
     if (!error && data) setItems(data);
     setLoading(false);
-  };
+  }, [businessId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchItems();
+    }, [fetchItems]),
+  );
 
   const handleAdd = async () => {
     if (!name || !quantity) {
@@ -61,11 +68,14 @@ export default function InventoryScreen() {
       return;
     }
     setSaving(true);
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      setSaving(false);
+      showFeedback("Error", "No active business is available.");
+      return;
+    }
     const { error } = await supabase.from("inventory").insert({
-      user_id: user?.id,
+      user_id: session?.user?.id,
+      business_id: businessId,
       name,
       quantity: parseInt(quantity),
       unit,
@@ -143,12 +153,12 @@ export default function InventoryScreen() {
           <ArrowLeft size={26} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Inventory</Text>
-        <TouchableOpacity
+        {isOwner ? <TouchableOpacity
           style={[styles.addButton, { backgroundColor: colors.primary }]}
           onPress={() => setModalVisible(true)}
         >
           <Text style={[styles.addButtonText, { color: colors.primaryText }]}>+ Add</Text>
-        </TouchableOpacity>
+        </TouchableOpacity> : <View style={styles.headerActionSpacer} />}
       </View>
 
       {lowStockItems.length > 0 && (
@@ -191,7 +201,7 @@ export default function InventoryScreen() {
           </View>
           <Text style={[styles.emptyText, { color: colors.text }]}>No items yet</Text>
           <Text style={[styles.emptySubText, { color: colors.textMuted }]}>
-            Tap + Add to track your first item
+            {isOwner ? "Tap + Add to track your first item" : "No inventory items yet"}
           </Text>
         </View>
       ) : (
@@ -238,20 +248,22 @@ export default function InventoryScreen() {
                 </View>
 
                 <View style={styles.itemBottom}>
-                  <TouchableOpacity
-                    style={[
-                      styles.qtyButton,
-                      {
-                        backgroundColor: colors.surfaceSubtle,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                    onPress={() => adjustQuantity(item, -1)}
-                    activeOpacity={0.8}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Text style={[styles.qtyButtonText, { color: colors.text }]}>−</Text>
-                  </TouchableOpacity>
+                  {isOwner ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.qtyButton,
+                        {
+                          backgroundColor: colors.surfaceSubtle,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                      onPress={() => adjustQuantity(item, -1)}
+                      activeOpacity={0.8}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={[styles.qtyButtonText, { color: colors.text }]}>−</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   <Text
                     style={[
                       styles.qtyValue,
@@ -261,27 +273,31 @@ export default function InventoryScreen() {
                   >
                     {item.quantity}
                   </Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.qtyButton,
-                      {
-                        backgroundColor: colors.surfaceSubtle,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                    onPress={() => adjustQuantity(item, 1)}
-                    activeOpacity={0.8}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Text style={[styles.qtyButtonText, { color: colors.text }]}>+</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.deleteButton}
-                    onPress={() => deleteItem(item.id, item.name)}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Text style={[styles.deleteText, { color: colors.danger }]}>Remove</Text>
-                  </TouchableOpacity>
+                  {isOwner ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.qtyButton,
+                        {
+                          backgroundColor: colors.surfaceSubtle,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                      onPress={() => adjustQuantity(item, 1)}
+                      activeOpacity={0.8}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={[styles.qtyButtonText, { color: colors.text }]}>+</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {isOwner ? (
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => deleteItem(item.id, item.name)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={[styles.deleteText, { color: colors.danger }]}>Remove</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
             );
@@ -289,7 +305,7 @@ export default function InventoryScreen() {
         </ScrollView>
       )}
 
-      <Modal visible={modalVisible} transparent animationType="slide">
+      <Modal visible={isOwner && modalVisible} transparent animationType="slide">
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <View
             style={[
@@ -417,6 +433,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   headerTitle: { fontSize: 22, fontWeight: "700", flex: 1 },
+  headerActionSpacer: { width: 64 },
   addButton: {
     borderRadius: 10,
     paddingHorizontal: 16,

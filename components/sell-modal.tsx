@@ -1,19 +1,18 @@
 import { X } from "lucide-react-native";
 import { useState } from "react";
 import {
-    ActivityIndicator,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { CURRENCIES } from "../constants/currency";
 import { supabase } from "../constants/supabase";
-import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
-import { showDialog, showFeedback } from "./app-feedback";
+import { showFeedback } from "./app-feedback";
 
 export type SellModalItem = {
   id: string;
@@ -42,7 +41,6 @@ export default function SellModal({
   onClose,
   onComplete,
 }: SellModalProps) {
-  const { session } = useAuth();
   const { colors, currency } = useTheme();
 
   const [saleDraft, setSaleDraft] = useState<SaleDraft | null>(null);
@@ -97,72 +95,35 @@ export default function SellModal({
 
     setLoading(true);
     try {
-      const { data: stockData, error: stockError } = await supabase.rpc(
-        "decrement_catalogue_stock",
+      const { data, error } = await supabase.rpc(
+        "record_sale",
         {
           p_catalogue_item_id: item.id,
           p_quantity: parsedQty,
+          p_unit_price: parsedPrice,
           p_reason: "Sale",
         },
       );
 
-      if (stockError) {
-        showFeedback("Stock update failed", stockError.message);
+      if (error) {
+        showFeedback("Sale failed", error.message);
         setLoading(false);
         return;
       }
 
-      const stockResult = Array.isArray(stockData) ? stockData[0] : stockData;
-      const stockUpdated = stockResult?.updated === true;
+      const saleResult = Array.isArray(data) ? data[0] : data;
+      const saleRecorded = saleResult?.updated === true;
       const newQuantity =
-        stockResult?.new_quantity != null
-          ? Number(stockResult.new_quantity)
+        saleResult?.new_quantity != null
+          ? Number(saleResult.new_quantity)
           : null;
 
-      if (!stockUpdated) {
+      if (!saleRecorded) {
         if (typeof newQuantity === "number" && !isNaN(newQuantity)) {
           showFeedback("Stock Error", `Only ${newQuantity} available`);
         } else {
           showFeedback("Stock Error", "This item could not be found");
         }
-        setLoading(false);
-        return;
-      }
-
-      const now = new Date();
-      const day = String(now.getDate()).padStart(2, "0");
-      const month = String(now.getMonth() + 1).padStart(2, "0");
-      const year = now.getFullYear();
-      const autoDate = `${day}/${month}/${year}`;
-
-      let hours = now.getHours();
-      const minutes = String(now.getMinutes()).padStart(2, "0");
-      const ampm = hours >= 12 ? "PM" : "AM";
-      hours = hours % 12;
-      hours = hours ? hours : 12;
-      const autoTime = `${hours}:${minutes} ${ampm}`;
-
-      const { error: jobError } = await supabase.from("jobs").insert({
-        user_id: session?.user?.id,
-        record_type: "sale",
-        customer_name: null,
-        customer_phone: null,
-        service: item.name,
-        quantity: parsedQty,
-        unit_price: parsedPrice,
-        unit_cost: item.cost_price ?? null,
-        catalogue_item_id: item.id,
-        price: parsedPrice,
-        date: autoDate,
-        time: autoTime,
-      });
-
-      if (jobError) {
-        showDialog(
-          "Sale not fully recorded",
-          `Stock was already reduced by ${parsedQty}, but the sale record failed to save: ${jobError.message}. Please check the catalogue quantity and create the sale record manually if needed.`
-        );
-        onComplete?.();
         setLoading(false);
         return;
       }

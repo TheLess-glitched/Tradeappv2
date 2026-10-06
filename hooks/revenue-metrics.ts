@@ -5,6 +5,10 @@ export type RevenueRecord = {
   unit_price: number | null;
   unit_cost: number | null;
   status: string;
+  completed_at: string | null;
+  created_at: string;
+  created_by: string | null;
+  created_by_name: string | null;
 };
 
 export function getJobProfit(

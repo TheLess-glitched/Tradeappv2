@@ -22,10 +22,11 @@ type ThemeContextType = {
   currency: CurrencyCode;
   defaultCountryCode: string;
   isPinUnlocked: boolean;
+  pinUnlockedUserId: string | null;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   setCurrency: (currency: CurrencyCode) => Promise<void>;
   setDefaultCountryCode: (code: string) => Promise<void>;
-  setPinUnlocked: (unlocked: boolean) => void;
+  setPinUnlocked: (unlocked: boolean, userId?: string) => void;
 };
 
 const ThemeContext = createContext<ThemeContextType>({
@@ -36,6 +37,7 @@ const ThemeContext = createContext<ThemeContextType>({
   currency: DEFAULT_CURRENCY,
   defaultCountryCode: DEFAULT_COUNTRY_CODE,
   isPinUnlocked: false,
+  pinUnlockedUserId: null,
   setThemeMode: async () => {},
   setCurrency: async () => {},
   setDefaultCountryCode: async () => {},
@@ -47,7 +49,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [themeMode, setThemeModeState] = useState<ThemeMode>("system");
   const [currency, setCurrencyState] = useState<CurrencyCode>(DEFAULT_CURRENCY);
   const [defaultCountryCode, setDefaultCountryCodeState] = useState(DEFAULT_COUNTRY_CODE);
-  const [isPinUnlocked, setIsPinUnlocked] = useState(false);
+  const [pinUnlockedUserId, setPinUnlockedUserId] = useState<string | null>(null);
+  const isPinUnlocked = pinUnlockedUserId !== null;
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
@@ -125,8 +128,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const isDark = effectiveScheme === "dark";
   const colors = isDark ? Colors.dark : Colors.light;
 
-  const setPinUnlocked = useCallback((unlocked: boolean) => {
-    setIsPinUnlocked(unlocked);
+  const setPinUnlocked = useCallback((unlocked: boolean, userId?: string) => {
+    setPinUnlockedUserId(unlocked ? userId ?? null : null);
   }, []);
 
   const contextValue = useMemo(
@@ -138,12 +141,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       currency,
       defaultCountryCode,
       isPinUnlocked,
+      pinUnlockedUserId,
       setThemeMode,
       setCurrency,
       setDefaultCountryCode,
       setPinUnlocked,
     }),
-    [themeMode, effectiveScheme, isDark, colors, currency, defaultCountryCode, isPinUnlocked, setThemeMode, setCurrency, setDefaultCountryCode, setPinUnlocked],
+    [themeMode, effectiveScheme, isDark, colors, currency, defaultCountryCode, isPinUnlocked, pinUnlockedUserId, setThemeMode, setCurrency, setDefaultCountryCode, setPinUnlocked],
   );
 
   return (

@@ -30,7 +30,7 @@ type TrackedCatalogueItem = {
 };
 
 export default function QuickSellScreen() {
-  const { session, isSessionReady } = useAuth();
+  const { businessId } = useAuth();
   const { colors, currency } = useTheme();
 
   const [items, setItems] = useState<TrackedCatalogueItem[]>([]);
@@ -46,13 +46,15 @@ export default function QuickSellScreen() {
     }
 
     try {
-      const userId = session?.user?.id;
-      if (!userId) return;
+      if (!businessId) {
+        setItems([]);
+        return;
+      }
 
       const { data, error } = await supabase
         .from("catalogue")
         .select("id, name, selling_price, cost_price, quantity, unit, reorder_level, track_stock")
-        .eq("user_id", userId)
+        .eq("business_id", businessId)
         .eq("track_stock", true)
         .order("name", { ascending: true });
 
@@ -65,7 +67,7 @@ export default function QuickSellScreen() {
     } finally {
       setLoading(false);
     }
-  }, [session?.user?.id]);
+  }, [businessId]);
 
   useFocusEffect(
     useCallback(() => {

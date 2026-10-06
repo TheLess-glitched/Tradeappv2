@@ -9,6 +9,8 @@ import {
     Settings,
     Shield,
     ShoppingCart,
+    UserPlus,
+    Users,
     X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -45,6 +47,8 @@ type Job = {
   status: "pending" | "in_progress" | "done";
   time: string;
   line_total: number | null;
+  created_by: string | null;
+  created_by_name: string | null;
 };
 
 type NotificationItem = {
@@ -66,8 +70,20 @@ const STATUS_LABELS = {
 
 export default function CommandCenter() {
   const { colors, currency } = useTheme();
-  const { session, isSessionReady } = useAuth();
-  const { totalRevenue } = useTodaysJobs();
+  const { session, isSessionReady, businessId, role } = useAuth();
+  const isOwner = role === "owner";
+  const isWorker = role === "worker";
+  const { totalRevenue, completedJobsToday, salesCompletedToday } = useTodaysJobs();
+  const mySalesToday = salesCompletedToday.filter(
+    (sale) => sale.created_by === session?.user?.id,
+  );
+  const myJobsToday = completedJobsToday.filter(
+    (job) => job.created_by === session?.user?.id,
+  );
+  const myDayRevenue = [...mySalesToday, ...myJobsToday].reduce(
+    (total, record) => total + (record.line_total ?? 0),
+    0,
+  );
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,8 +132,9 @@ export default function CommandCenter() {
     try {
       const { data, error } = await supabase
         .from("jobs")
-        .select("id, customer_name, service, record_type, status, time, line_total")
-        .eq("user_id", session?.user?.id)
+        .select("id, customer_name, service, record_type, status, time, line_total, created_by, created_by_name")
+        .eq("business_id", businessId)
+        .is("voided_at", null)
         .order("created_at", { ascending: false })
         .limit(2);
 
@@ -131,7 +148,7 @@ export default function CommandCenter() {
     } finally {
       setLoading(false);
     }
-  }, [session?.user?.id]);
+  }, [businessId]);
 
   const handleOpenNotifications = useCallback(async () => {
     setNotifModalOpen(true);
@@ -143,7 +160,6 @@ export default function CommandCenter() {
         await supabase
           .from("notifications")
           .update({ is_read: true })
-          .eq("user_id", session.user.id)
           .eq("is_read", false);
       } catch {
       }
@@ -163,7 +179,6 @@ export default function CommandCenter() {
         await supabase
           .from("notifications")
           .update({ is_read: true })
-          .eq("user_id", session.user.id)
           .in("id", reminderIds);
       } catch {
       }
@@ -244,7 +259,6 @@ export default function CommandCenter() {
       const { data, error } = await supabase
         .from("notifications")
         .select("*")
-        .eq("user_id", session.user.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -353,21 +367,29 @@ export default function CommandCenter() {
         {/* Stat Cards */}
         <View style={styles.statsRow}>
           <StatCard
-            label="Revenue Today"
-            value={formatCurrency(totalRevenue, currency)}
+            label={isWorker ? "My Day" : "Revenue Today"}
+            value={
+              isWorker
+                ? formatCurrency(myDayRevenue, currency)
+                : formatCurrency(totalRevenue, currency)
+            }
             colors={colors}
             backgroundColor={colors.primary}
             borderColor={colors.primary}
             labelColor={colors.primaryText}
             valueColor={colors.primaryText}
-            subtitle="Tap for today's summary & Close Day"
+            subtitle={
+              isWorker
+                ? `${mySalesToday.length} sales · ${myJobsToday.length} jobs done`
+                : "Tap for today's summary & Close Day"
+            }
             subtitleColor={colors.primaryText}
             subtitleFontSize={13}
             subtitleLineHeight={18}
             subtitleNumberOfLines={2}
             subtitleAdjustsFontSizeToFit={false}
             minHeight={116}
-            onPress={() => router.push("/daily-close" as any)}
+            onPress={isOwner || isWorker ? () => router.push("/daily-close" as any) : undefined}
           />
           <StatCard
             label="Open Jobs"
@@ -497,6 +519,11 @@ export default function CommandCenter() {
                       <Text style={[styles.jobService, { color: colors.textMuted }]}>
                         {job.service}
                       </Text>
+                      {isOwner && job.created_by_name ? (
+                        <Text style={[styles.jobService, { color: colors.textMuted }]}>
+                          by {job.created_by_name}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                   <View style={styles.jobRight}>
@@ -563,6 +590,46 @@ export default function CommandCenter() {
             </View>
 
             <View style={[styles.drawerDivider, { backgroundColor: colors.border }]} />
+
+            {role === "owner" || role === "worker" ? (
+              <TouchableOpacity
+                style={styles.drawerItem}
+                onPress={() => {
+                  closeDrawer();
+                  setTimeout(() => router.push("/team" as any), 300);
+                }}
+              >
+                <View
+                  style={[
+                    styles.drawerItemIcon,
+                    { backgroundColor: colors.secondarySurface },
+                  ]}
+                >
+                  <Users size={20} color={colors.secondary} />
+                </View>
+                <Text style={[styles.drawerItemText, { color: colors.text }]}>Team</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity
+              style={styles.drawerItem}
+              onPress={() => {
+                closeDrawer();
+                setTimeout(() => router.push("/join-business" as any), 300);
+              }}
+            >
+              <View
+                style={[
+                  styles.drawerItemIcon,
+                  { backgroundColor: colors.secondarySurface },
+                ]}
+              >
+                <UserPlus size={20} color={colors.secondary} />
+              </View>
+              <Text style={[styles.drawerItemText, { color: colors.text }]}>
+                Join a business
+              </Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.drawerItem}

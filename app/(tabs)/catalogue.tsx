@@ -8,7 +8,7 @@ import {
     Trash2,
     X,
 } from "lucide-react-native";
-import React, { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
@@ -21,11 +21,11 @@ import {
     View,
 } from "react-native";
 import { showFeedback } from "../../components/app-feedback";
+import SellModal from "../../components/sell-modal";
 import { CURRENCIES, formatCurrency } from "../../constants/currency";
 import { supabase } from "../../constants/supabase";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
-import SellModal from "../../components/sell-modal";
 
 type CatalogueItem = {
   id: string;
@@ -42,7 +42,8 @@ type CatalogueItem = {
 };
 
 export default function CatalogueScreen() {
-  const { session } = useAuth();
+  const { businessId, session, role } = useAuth();
+  const isOwner = role === "owner";
   const { colors, currency } = useTheme();
 
   const [items, setItems] = useState<CatalogueItem[]>([]);
@@ -85,20 +86,22 @@ export default function CatalogueScreen() {
       setLoading(true);
     }
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from("catalogue")
       .select("*")
-      .eq("user_id", user?.id)
+      .eq("business_id", businessId)
       .order("created_at", { ascending: false });
     if (!error && data) {
       setItems(data);
       hasDataRef.current = data.length > 0;
     }
     setLoading(false);
-  }, []);
+  }, [businessId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -111,9 +114,10 @@ export default function CatalogueScreen() {
       showFeedback("Missing info", "Please enter a name and quantity.");
       return;
     }
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      showFeedback("Error", "No active business is available.");
+      return;
+    }
 
     if (editingItem) {
       const { error } = await supabase
@@ -129,7 +133,6 @@ export default function CatalogueScreen() {
           track_stock: trackStock,
           supplier,
           location,
-          updated_at: new Date().toISOString(),
         })
         .eq("id", editingItem.id);
       if (error) {
@@ -138,7 +141,8 @@ export default function CatalogueScreen() {
       }
     } else {
       const { error } = await supabase.from("catalogue").insert({
-        user_id: user?.id,
+        user_id: session?.user?.id,
+        business_id: businessId,
         name,
         category,
         quantity: parseFloat(quantity),
@@ -176,6 +180,7 @@ export default function CatalogueScreen() {
       .from("catalogue_stock_movements")
       .insert({
         user_id: user?.id,
+        business_id: businessId,
         catalogue_item_id: selectedItem.id,
         movement_type: movementType,
         quantity: qty,
@@ -194,7 +199,7 @@ export default function CatalogueScreen() {
 
     await supabase
       .from("catalogue")
-      .update({ quantity: newQty, updated_at: new Date().toISOString() })
+      .update({ quantity: newQty })
       .eq("id", selectedItem.id);
 
     setMovementModal(false);
@@ -276,7 +281,7 @@ export default function CatalogueScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Catalogue</Text>
-        <TouchableOpacity
+        {isOwner ? <TouchableOpacity
           style={[styles.addButton, { backgroundColor: colors.primary }]}
           onPress={() => {
             resetForm();
@@ -284,7 +289,7 @@ export default function CatalogueScreen() {
           }}
         >
           <Plus size={22} color={colors.primaryText} />
-        </TouchableOpacity>
+        </TouchableOpacity> : <View style={styles.headerActionSpacer} />}
       </View>
 
       <View
@@ -381,9 +386,9 @@ export default function CatalogueScreen() {
                 </View>
               </View>
 
-              {item.cost_price || item.supplier || item.location ? (
+              {item.cost_price && isOwner || item.selling_price || item.supplier || item.location ? (
                 <View style={styles.itemMeta}>
-                  {item.cost_price ? (
+                  {isOwner && item.cost_price ? (
                     <Text style={[styles.metaText, { color: colors.textSecondary }]}>
                       Cost: {formatCurrency(item.cost_price || 0, currency)}
                     </Text>
@@ -429,7 +434,7 @@ export default function CatalogueScreen() {
                     </Text>
                   </TouchableOpacity>
                 ) : null}
-                <TouchableOpacity
+                {isOwner ? <TouchableOpacity
                   style={[
                     styles.actionBtn,
                     { backgroundColor: colors.secondarySurface },
@@ -443,8 +448,8 @@ export default function CatalogueScreen() {
                   <Text style={[styles.inBtnText, { color: colors.primary }]}>
                     + Stock In
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
+                </TouchableOpacity> : null}
+                {isOwner ? <TouchableOpacity
                   style={[
                     styles.actionBtn,
                     { backgroundColor: colors.dangerSurface },
@@ -458,8 +463,8 @@ export default function CatalogueScreen() {
                   <Text style={[styles.outBtnText, { color: colors.danger }]}>
                     - Stock Out
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
+                </TouchableOpacity> : null}
+                {isOwner ? <TouchableOpacity
                   style={[styles.iconBtn, { backgroundColor: colors.surfaceSubtle }]}
                   onPress={(e) => {
                     e.stopPropagation?.();
@@ -467,8 +472,8 @@ export default function CatalogueScreen() {
                   }}
                 >
                   <Pencil size={15} color={colors.textSecondary} />
-                </TouchableOpacity>
-                <TouchableOpacity
+                </TouchableOpacity> : null}
+                {isOwner ? <TouchableOpacity
                   style={[styles.iconBtn, { backgroundColor: colors.dangerSurface }]}
                   onPress={(e) => {
                     e.stopPropagation?.();
@@ -476,7 +481,7 @@ export default function CatalogueScreen() {
                   }}
                 >
                   <Trash2 size={15} color={colors.danger} />
-                </TouchableOpacity>
+                </TouchableOpacity> : null}
               </View>
             </TouchableOpacity>
           )}
@@ -484,7 +489,7 @@ export default function CatalogueScreen() {
       )}
 
       {/* Add/Edit Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <Modal visible={isOwner && modalVisible} animationType="slide" transparent>
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <View
             style={[
@@ -603,7 +608,7 @@ export default function CatalogueScreen() {
               </View>
 
               <View style={styles.row}>
-                <View style={styles.rowItem}>
+                {isOwner ? <View style={styles.rowItem}>
                   <Text style={[styles.label, { color: colors.textSecondary }]}>Cost Price ({CURRENCIES[currency].symbol})</Text>
                   <TextInput
                     style={[
@@ -620,7 +625,7 @@ export default function CatalogueScreen() {
                     onChangeText={setCostPrice}
                     keyboardType="numeric"
                   />
-                </View>
+                </View> : null}
                 <View style={styles.rowItem}>
                   <Text style={[styles.label, { color: colors.textSecondary }]}>Selling Price ({CURRENCIES[currency].symbol})</Text>
                   <TextInput
@@ -727,7 +732,7 @@ export default function CatalogueScreen() {
       </Modal>
 
       {/* Movement Modal */}
-      <Modal visible={movementModal} animationType="slide" transparent>
+      <Modal visible={isOwner && movementModal} animationType="slide" transparent>
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <View
             style={[
@@ -905,6 +910,7 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 16,
   },
+  headerActionSpacer: { width: 40 },
   headerTitle: { fontSize: 28, fontWeight: "700" },
   addButton: {
     width: 40,

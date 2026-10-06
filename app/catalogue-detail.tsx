@@ -7,7 +7,7 @@ import {
     Pencil,
     X,
 } from "lucide-react-native";
-import React, { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
     Modal,
     ScrollView,
@@ -20,6 +20,7 @@ import {
 import { showFeedback } from "../components/app-feedback";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
 import { supabase } from "../constants/supabase";
+import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 type Item = {
@@ -73,6 +74,8 @@ const statuses = [
 ];
 
 export default function CatalogueDetailScreen() {
+  const { businessId, session, role } = useAuth();
+  const isOwner = role === "owner";
   const { colors, currency } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
 
@@ -115,27 +118,31 @@ export default function CatalogueDetailScreen() {
     if (!hasDataRef.current) {
       setLoading(true);
     }
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      setItem(null);
+      setMovements([]);
+      setNotes([]);
+      setLoading(false);
+      return;
+    }
 
     const { data: itemData } = await supabase
       .from("catalogue")
       .select("*")
       .eq("id", id)
-      .eq("user_id", user?.id)
+      .eq("business_id", businessId)
       .single();
     const { data: movData } = await supabase
       .from("catalogue_stock_movements")
       .select("*")
       .eq("catalogue_item_id", id)
-      .eq("user_id", user?.id)
+      .eq("business_id", businessId)
       .order("created_at", { ascending: false });
     const { data: noteData } = await supabase
       .from("catalogue_notes")
       .select("*")
       .eq("catalogue_item_id", id)
-      .eq("user_id", user?.id)
+      .eq("business_id", businessId)
       .order("created_at", { ascending: false });
 
     if (itemData) {
@@ -145,7 +152,7 @@ export default function CatalogueDetailScreen() {
     if (movData) setMovements(movData);
     if (noteData) setNotes(noteData);
     setLoading(false);
-  }, [id]);
+  }, [businessId, id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -158,11 +165,13 @@ export default function CatalogueDetailScreen() {
       showFeedback("Missing info", "Please enter a description.");
       return;
     }
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    if (!businessId) {
+      showFeedback("Error", "No active business is available.");
+      return;
+    }
     const { error } = await supabase.from("catalogue_notes").insert({
-      user_id: user?.id,
+      user_id: session?.user?.id,
+      business_id: businessId,
       catalogue_item_id: id,
       note_type: noteType,
       status: noteStatus,
@@ -194,6 +203,7 @@ export default function CatalogueDetailScreen() {
       .from("catalogue_stock_movements")
       .insert({
         user_id: user?.id,
+        business_id: businessId,
         catalogue_item_id: id,
         movement_type: movType,
         quantity: qty,
@@ -210,7 +220,7 @@ export default function CatalogueDetailScreen() {
 
     await supabase
       .from("catalogue")
-      .update({ quantity: newQty, updated_at: new Date().toISOString() })
+      .update({ quantity: newQty })
       .eq("id", id);
 
     resetMovForm();
@@ -291,13 +301,13 @@ export default function CatalogueDetailScreen() {
         <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
           {item.name}
         </Text>
-        <TouchableOpacity
+        {isOwner ? <TouchableOpacity
           onPress={() =>
             showFeedback("Edit Item", "Edit functionality coming soon.")
           }
         >
           <Pencil size={22} color={colors.textSecondary} />
-        </TouchableOpacity>
+        </TouchableOpacity> : <View style={styles.headerActionSpacer} />}
       </View>
 
       <ScrollView
@@ -352,7 +362,7 @@ export default function CatalogueDetailScreen() {
         </View>
 
         <View style={styles.metaGrid}>
-          {item.cost_price ? (
+          {isOwner && item.cost_price ? (
             <View
               style={[
                 styles.metaBox,
@@ -416,24 +426,26 @@ export default function CatalogueDetailScreen() {
               </Text>
             </View>
           ) : null}
-          <View
-            style={[
-              styles.metaBox,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={[styles.metaLabel, { color: colors.textMuted }]}>Reorder Level</Text>
-            <Text style={[styles.metaValue, { color: colors.text }]}>
-              {item.reorder_level} {item.unit}
-            </Text>
-          </View>
+          {isOwner ? (
+            <View
+              style={[
+                styles.metaBox,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.metaLabel, { color: colors.textMuted }]}>Reorder Level</Text>
+              <Text style={[styles.metaValue, { color: colors.text }]}>
+                {item.reorder_level} {item.unit}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.actionRow}>
-          <TouchableOpacity
+          {isOwner ? <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: colors.primary }]}
             onPress={() => setMovModal(true)}
           >
@@ -441,7 +453,7 @@ export default function CatalogueDetailScreen() {
             <Text style={[styles.actionBtnText, { color: colors.primaryText }]}>
               Record Movement
             </Text>
-          </TouchableOpacity>
+          </TouchableOpacity> : null}
           <TouchableOpacity
             style={[
               styles.actionBtn,
@@ -559,7 +571,7 @@ export default function CatalogueDetailScreen() {
                 <Text style={[styles.noteDesc, { color: colors.text }]}>
                   {n.description}
                 </Text>
-                {n.cost ? (
+                {isOwner && n.cost ? (
                   <Text style={[styles.noteCost, { color: colors.statusDone }]}>
                     Cost: {formatCurrency(n.cost || 0, currency)}
                   </Text>
@@ -705,6 +717,8 @@ export default function CatalogueDetailScreen() {
                 numberOfLines={3}
               />
 
+              {isOwner ? (
+                <>
               <Text style={[styles.label, { color: colors.textSecondary }]}>
                 Cost (optional, {CURRENCIES[currency].symbol})
               </Text>
@@ -723,6 +737,8 @@ export default function CatalogueDetailScreen() {
                 onChangeText={setNoteCost}
                 keyboardType="numeric"
               />
+                </>
+              ) : null}
 
               <TouchableOpacity
                 style={[styles.saveButton, { backgroundColor: colors.primary }]}
@@ -738,7 +754,7 @@ export default function CatalogueDetailScreen() {
       </Modal>
 
       {/* Movement Modal */}
-      <Modal visible={movModal} animationType="slide" transparent>
+      <Modal visible={isOwner && movModal} animationType="slide" transparent>
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <View
             style={[
@@ -889,6 +905,7 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingBottom: 16,
   },
+  headerActionSpacer: { width: 24 },
   backBtn: {
     width: 40,
     height: 40,

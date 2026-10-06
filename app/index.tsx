@@ -16,28 +16,33 @@ import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 export default function LoginScreen() {
-  const { colors, isPinUnlocked } = useTheme();
-  const { session, isSessionReady } = useAuth();
+  const { colors, isPinUnlocked, pinUnlockedUserId } = useTheme();
+  const { session, isSessionReady, isBusinessReady, businessError, role } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!isSessionReady) {
-      return;
-    }
-
-    if (session) {
-      if (isPinUnlocked) {
-        router.replace("/(tabs)/home" as any);
-      } else {
-        router.replace("/pin" as any);
-      }
+    if (!isSessionReady || !session) return;
+    if (isPinUnlocked && pinUnlockedUserId === session.user.id) {
+      router.replace(
+        isBusinessReady && !businessError && role === null
+          ? ("/no-business" as any)
+          : ("/(tabs)/home" as any),
+      );
     } else {
-      setLoading(false);
+      router.replace("/pin" as any);
     }
-  }, [isSessionReady, session, isPinUnlocked]);
+  }, [
+    isSessionReady,
+    session,
+    isPinUnlocked,
+    pinUnlockedUserId,
+    isBusinessReady,
+    businessError,
+    role,
+  ]);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -57,7 +62,7 @@ export default function LoginScreen() {
     }
   };
 
-  if (loading) {
+  if (loading || !isSessionReady) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
         <View style={styles.loadingShell}>
@@ -157,6 +162,14 @@ export default function LoginScreen() {
           <TouchableOpacity onPress={() => router.push("/signup" as any)}>
             <Text style={[styles.signupLink, { color: colors.primary }]}>
               Create account
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.joinRow}>
+          <TouchableOpacity onPress={() => router.push("/join-business" as any)}>
+            <Text style={[styles.signupLink, { color: colors.primary }]}>
+              Join a business
             </Text>
           </TouchableOpacity>
         </View>
@@ -268,5 +281,9 @@ const styles = StyleSheet.create({
   signupLink: {
     fontSize: 14,
     fontWeight: "600",
+  },
+  joinRow: {
+    alignItems: "center",
+    marginTop: 20,
   },
 });
