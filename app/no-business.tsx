@@ -22,6 +22,7 @@ export default function NoBusinessScreen() {
   };
 
   const createOwnBusiness = async () => {
+    if (creatingBusiness) return;
     setCreatingBusiness(true);
     try {
       const { error } = await supabase.rpc("create_own_business");
@@ -34,7 +35,7 @@ export default function NoBusinessScreen() {
       if (result.failed) {
         showToast(
           "Business created",
-          "Your business was created, but your details could not be refreshed. Please try again.",
+          "Business created. Reopen the app to continue.",
         );
         return;
       }
@@ -53,7 +54,7 @@ export default function NoBusinessScreen() {
   const confirmCreateBusiness = () => {
     showDialog(
       "Start my own business?",
-      "This creates a new, empty business of your own. You won't see the business you were removed from.",
+      "This creates a new, empty business that you'll own.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -70,6 +71,7 @@ export default function NoBusinessScreen() {
         You&apos;re not part of a business
       </Text>
       <TouchableOpacity
+        disabled={creatingBusiness}
         onPress={() => router.push("/join-business" as any)}
         style={[styles.primaryButton, { backgroundColor: colors.primary }]}
       >
