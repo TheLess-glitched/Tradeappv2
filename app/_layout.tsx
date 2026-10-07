@@ -5,6 +5,7 @@ import { ActivityIndicator, AppState, Linking, Text, TouchableOpacity, View } fr
 import { AppFeedbackProvider, showToast } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
 import { AuthProvider, useAuth } from "../context/auth-context";
+import { CartProvider } from "../context/cart-context";
 import { ThemeProvider, useTheme } from "../context/theme-context";
 
 function RootNavigator() {
@@ -184,11 +185,13 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <ThemeProvider>
-        <AppFeedbackProvider>
-          <RootNavigator />
-        </AppFeedbackProvider>
-      </ThemeProvider>
+      <CartProvider>
+        <ThemeProvider>
+          <AppFeedbackProvider>
+            <RootNavigator />
+          </AppFeedbackProvider>
+        </ThemeProvider>
+      </CartProvider>
     </AuthProvider>
   );
 }

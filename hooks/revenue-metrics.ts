@@ -9,6 +9,7 @@ export type RevenueRecord = {
   created_at: string;
   created_by: string | null;
   created_by_name: string | null;
+  sale_group_id?: string | null;
 };
 
 export function getJobProfit(
@@ -28,9 +29,17 @@ export function calculateRevenueMetrics(
     (job) => job.status === "pending" || job.status === "in_progress",
   );
   const profitRecords = [...sales, ...completedJobs];
-  const unknownCostSalesCount = sales.filter(
-    (sale) => getJobProfit(sale) == null,
-  ).length;
+  const unknownCostSaleGroups = new Set<string>();
+  sales.forEach((sale, index) => {
+    if (getJobProfit(sale) == null) {
+      unknownCostSaleGroups.add(
+        sale.sale_group_id == null
+          ? `line:${index}`
+          : `group:${sale.sale_group_id}`,
+      );
+    }
+  });
+  const unknownCostSalesCount = unknownCostSaleGroups.size;
   const unknownCostCompletedJobsCount = completedJobs.filter(
     (job) => getJobProfit(job) == null,
   ).length;

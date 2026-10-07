@@ -13,7 +13,7 @@ import {
     Users,
     X,
 } from "lucide-react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Animated,
     Dimensions,
@@ -35,6 +35,7 @@ import { getStatusStyle } from "../../constants/theme";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
 import { useTodaysJobs } from "../../hooks/use-todays-jobs";
+import { describeSaleGroup, groupSaleRows, SaleGroup } from "../../hooks/sale-groups";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
@@ -47,8 +48,14 @@ type Job = {
   status: "pending" | "in_progress" | "done";
   time: string;
   line_total: number | null;
+  quantity: number;
+  unit_price: number | null;
+  created_at: string;
   created_by: string | null;
   created_by_name: string | null;
+  sale_group_id: string | null;
+  voided_at: string | null;
+  void_reason: string | null;
 };
 
 type NotificationItem = {
@@ -76,6 +83,9 @@ export default function CommandCenter() {
   const { totalRevenue, completedJobsToday, salesCompletedToday } = useTodaysJobs();
   const mySalesToday = salesCompletedToday.filter(
     (sale) => sale.created_by === session?.user?.id,
+  );
+  const mySalesTodayGroups = groupSaleRows(salesCompletedToday).filter(
+    (group) => group.created_by === session?.user?.id,
   );
   const myJobsToday = completedJobsToday.filter(
     (job) => job.created_by === session?.user?.id,
@@ -130,18 +140,26 @@ export default function CommandCenter() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select("id, customer_name, service, record_type, status, time, line_total, created_by, created_by_name")
-        .eq("business_id", businessId)
-        .is("voided_at", null)
-        .order("created_at", { ascending: false })
-        .limit(2);
+      const pageSize = 500;
+      const allRows: Job[] = [];
+      let offset = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("jobs")
+          .select("id, customer_name, service, record_type, status, time, line_total, quantity, unit_price, created_at, created_by, created_by_name, sale_group_id, voided_at, void_reason")
+          .eq("business_id", businessId)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
+          .range(offset, offset + pageSize - 1);
 
-      if (error) throw error;
+        if (error) throw error;
+        allRows.push(...(data ?? []));
+        if ((data?.length ?? 0) < pageSize) break;
+        offset += pageSize;
+      }
 
-      setJobs(data ?? []);
-      hasDataRef.current = (data?.length ?? 0) > 0;
+      setJobs(allRows);
+      hasDataRef.current = allRows.length > 0;
     } catch (err) {
       setJobs([]);
       hasDataRef.current = false;
@@ -149,6 +167,34 @@ export default function CommandCenter() {
       setLoading(false);
     }
   }, [businessId]);
+
+  const recentActivity = useMemo(() => {
+    const saleGroups = groupSaleRows(
+      jobs.filter((record) => record.record_type === "sale"),
+    )
+      .filter((group) => !group.voided)
+      .map((group) => ({
+        id: group.id,
+        record_type: "sale" as const,
+        group,
+        created_at: group.earliestTimestamp,
+      }));
+    const jobRows = jobs
+      .filter((record) => record.record_type === "job" && !record.voided_at)
+      .map((job) => ({
+        id: `job:${job.id}`,
+        record_type: "job" as const,
+        job,
+        created_at: job.created_at,
+      }));
+    return [...saleGroups, ...jobRows]
+      .sort(
+        (left, right) =>
+          new Date(right.created_at).getTime() -
+          new Date(left.created_at).getTime(),
+      )
+      .slice(0, 2);
+  }, [jobs]);
 
   const handleOpenNotifications = useCallback(async () => {
     setNotifModalOpen(true);
@@ -311,8 +357,8 @@ export default function CommandCenter() {
     }).start(() => setDrawerOpen(false));
   };
 
-  const openJobs = jobs.filter(
-    (record) => record.record_type === "job" && record.status !== "done",
+  const openJobs = recentActivity.filter(
+    (record) => record.record_type === "job" && record.job.status !== "done",
   ).length;
   const hour = new Date().getHours();
   const greeting =
@@ -380,7 +426,7 @@ export default function CommandCenter() {
             valueColor={colors.primaryText}
             subtitle={
               isWorker
-                ? `${mySalesToday.length} sales · ${myJobsToday.length} jobs done`
+                ? `${mySalesTodayGroups.length} sales · ${myJobsToday.length} jobs done`
                 : "Tap for today's summary & Close Day"
             }
             subtitleColor={colors.primaryText}
@@ -396,7 +442,7 @@ export default function CommandCenter() {
             value={openJobs}
             colors={colors}
             backgroundColor={colors.surface}
-            subtitle={`${jobs.length} recent records`}
+            subtitle={`${recentActivity.length} recent records`}
             onPress={() => router.push("/(tabs)/jobs" as any)}
           />
         </View>
@@ -469,7 +515,7 @@ export default function CommandCenter() {
               </View>
             ))}
           </View>
-        ) : jobs.length === 0 ? (
+        ) : recentActivity.length === 0 ? (
           <View style={styles.emptyState}>
             <View style={[styles.emptyIconWrap, { backgroundColor: colors.surfaceSubtle, borderColor: colors.border }]}>
               <Briefcase size={24} color={colors.primary} />
@@ -489,22 +535,32 @@ export default function CommandCenter() {
               },
             ]}
           >
-            {jobs.map((job) => {
+            {recentActivity.map((activity) => {
+              const job =
+                activity.record_type === "job" ? activity.job : activity.group.lines[0];
+              const group: SaleGroup<Job> | null =
+                activity.record_type === "sale" ? activity.group : null;
+              const creatorName =
+                group && group.lines.length > 1
+                  ? group.created_by_name
+                  : isOwner
+                    ? job.created_by_name
+                    : null;
               const statusStyles = getStatusStyle(
                 colors,
-                job.record_type === "sale" ? "done" : job.status,
+                activity.record_type === "sale" ? "done" : job.status,
               );
 
               return (
                 <TouchableOpacity
-                  key={job.id}
+                  key={activity.id}
                   style={[
                     styles.jobItem,
                     { borderBottomColor: colors.border },
                   ]}
                   onPress={() =>
                     router.push(
-                      job.record_type === "sale"
+                      activity.record_type === "sale"
                         ? ("/(tabs)/sales" as any)
                         : ("/(tabs)/jobs" as any),
                     )
@@ -514,14 +570,18 @@ export default function CommandCenter() {
                   <View style={styles.jobLeft}>
                     <View>
                       <Text style={[styles.jobCustomer, { color: colors.text }]}>
-                        {job.customer_name || "Walk-in Customer"}
+                        {group && group.lines.length > 1
+                          ? describeSaleGroup(group)
+                          : job.customer_name || "Walk-in Customer"}
                       </Text>
                       <Text style={[styles.jobService, { color: colors.textMuted }]}>
-                        {job.service}
+                        {group && group.lines.length > 1
+                          ? `${formatCurrency(group.total, currency)} · ${group.unitCount} units`
+                          : job.service}
                       </Text>
-                      {isOwner && job.created_by_name ? (
+                      {creatorName ? (
                         <Text style={[styles.jobService, { color: colors.textMuted }]}>
-                          by {job.created_by_name}
+                          by {creatorName}
                         </Text>
                       ) : null}
                     </View>
@@ -545,13 +605,18 @@ export default function CommandCenter() {
                           { color: statusStyles.text },
                         ]}
                       >
-                        {job.record_type === "sale"
+                        {activity.record_type === "sale"
                           ? "Sold"
                           : STATUS_LABELS[job.status] ?? job.status}
                       </Text>
                     </View>
                     <Text style={[styles.jobTime, { color: colors.textSecondary }]}>
-                      {job.time || "—"}
+                      {activity.record_type === "sale" && group && group.lines.length > 1
+                        ? new Date(group.earliestTimestamp).toLocaleTimeString([], {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : job.time || "—"}
                     </Text>
                   </View>
                 </TouchableOpacity>

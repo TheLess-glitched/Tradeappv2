@@ -18,11 +18,13 @@ import {
     View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
+import SaleGroupCard from "../components/sale-group-card";
 import StatCard from "../components/stat-card";
 import { formatCurrency } from "../constants/currency";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 import { getJobProfit, useTodaysJobs } from "../hooks/use-todays-jobs";
+import { groupSaleRows } from "../hooks/sale-groups";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
@@ -37,7 +39,6 @@ export default function DailyCloseScreen() {
   const isWorker = role === "worker";
   const {
     jobs,
-    sales,
     loading,
     jobsCount,
     pendingJobs,
@@ -58,8 +59,10 @@ export default function DailyCloseScreen() {
     voidedCount,
     voidedRevenue,
     voidedRecords,
+    voidedSaleGroupsToday,
     completedJobsToday,
     salesCompletedToday,
+    salesForDisplay,
   } = useTodaysJobs();
   const [voidsExpanded, setVoidsExpanded] = useState(false);
 
@@ -78,33 +81,83 @@ export default function DailyCloseScreen() {
     (sum, record) => sum + (record.line_total ?? 0),
     0,
   );
-  const records = (isWorker
-    ? [...jobs, ...sales].filter((record) => record.created_by === session?.user?.id)
-    : [...jobs, ...sales]
-  ).sort(
+  const dailySaleGroups = groupSaleRows(salesForDisplay).filter(
+    (group) =>
+      !group.voided &&
+      (!isWorker || group.created_by === session?.user?.id),
+  );
+  const dailyJobs = isWorker
+    ? jobs.filter((record) => record.created_by === session?.user?.id)
+    : jobs;
+  const records = [
+    ...dailyJobs.map((record) => ({
+      kind: "job" as const,
+      record,
+      created_at: record.created_at,
+    })),
+    ...dailySaleGroups.map((group) => ({
+      kind: "sale" as const,
+      group,
+      created_at: group.earliestTimestamp,
+    })),
+  ].sort(
     (left, right) =>
       new Date(right.created_at).getTime() - new Date(left.created_at).getTime(),
   );
-  const sortedVoidedRecords = [...voidedRecords].sort(
+  const isVoidedToday = (value: string | null) =>
+    value != null &&
+    new Date(value).toDateString() === new Date().toDateString();
+  const sortedVoidedRecords = [
+    ...voidedRecords
+      .filter((record) => record.record_type === "job")
+      .map((record) => ({
+        kind: "job" as const,
+        record,
+        voidedAt: record.voided_at,
+      })),
+    ...voidedSaleGroupsToday.map((group) => ({
+      kind: "sale" as const,
+      group,
+      voidedAt: group.lines.reduce<string | null>(
+        (latest, line) =>
+          isVoidedToday(line.voided_at) &&
+          new Date(line.voided_at ?? 0).getTime() >
+            new Date(latest ?? 0).getTime()
+            ? line.voided_at
+            : latest,
+        null,
+      ),
+    })),
+  ].sort(
     (left, right) =>
-      new Date(right.voided_at ?? 0).getTime() -
-      new Date(left.voided_at ?? 0).getTime(),
+      new Date(right.voidedAt ?? 0).getTime() -
+      new Date(left.voidedAt ?? 0).getTime(),
   );
   const revenueByPerson = new Map<
     string,
     { name: string; count: number; revenue: number }
   >();
-  for (const record of [...completedJobsToday, ...salesCompletedToday]) {
-    if (!record.created_by_name) continue;
+  const addPersonRevenue = (
+    record: { created_by: string | null; created_by_name: string | null },
+    count: number,
+    revenue: number,
+  ) => {
+    if (!record.created_by_name) return;
     const key = record.created_by ?? record.created_by_name;
     const current = revenueByPerson.get(key) ?? {
       name: record.created_by_name,
       count: 0,
       revenue: 0,
     };
-    current.count += 1;
-    current.revenue += record.line_total ?? 0;
+    current.count += count;
+    current.revenue += revenue;
     revenueByPerson.set(key, current);
+  };
+  for (const record of completedJobsToday) {
+    addPersonRevenue(record, 1, record.line_total ?? 0);
+  }
+  for (const group of groupSaleRows(salesCompletedToday)) {
+    addPersonRevenue(group, 1, group.total);
   }
 
   const handleFinishDay = () => {
@@ -277,7 +330,30 @@ export default function DailyCloseScreen() {
                   </TouchableOpacity>
                   {voidsExpanded ? (
                     <View style={styles.voidedList}>
-                      {sortedVoidedRecords.map((record) => {
+                      {sortedVoidedRecords.map((entry) => {
+                        if (entry.kind === "sale" && entry.group.lines.length > 1) {
+                          const voidedAmount = entry.group.lines.reduce(
+                            (sum, line) =>
+                              sum +
+                              (isVoidedToday(line.voided_at)
+                                ? line.line_total ?? 0
+                                : 0),
+                            0,
+                          );
+                          return (
+                            <SaleGroupCard
+                              key={`voided-${entry.group.id}`}
+                              group={entry.group}
+                              colors={colors}
+                              currency={currency}
+                              isOwner
+                              totalOverride={voidedAmount}
+                              amountLabel="Voided"
+                            />
+                          );
+                        }
+                        const record =
+                          entry.kind === "job" ? entry.record : entry.group.lines[0];
                         const isSale = record.record_type === "sale";
                         const voidedTime = record.voided_at
                           ? new Date(record.voided_at).toLocaleTimeString([], {
@@ -386,8 +462,21 @@ export default function DailyCloseScreen() {
               </Text>
             </View>
           ) : (
-            records.map((record) => {
-              const isSale = record.record_type === "sale";
+            records.map((entry) => {
+              if (entry.kind === "sale" && entry.group.lines.length > 1) {
+                return (
+                  <SaleGroupCard
+                    key={entry.group.id}
+                    group={entry.group}
+                    colors={colors}
+                    currency={currency}
+                    isOwner={isOwner}
+                  />
+                );
+              }
+              const record =
+                entry.kind === "job" ? entry.record : entry.group.lines[0];
+              const isSale = entry.kind === "sale";
               const profit = isSale ? getJobProfit(record) : null;
               const statusText = isSale
                 ? "Sold"
@@ -399,7 +488,7 @@ export default function DailyCloseScreen() {
 
               return (
                 <View
-                  key={record.id}
+                  key={entry.kind === "job" ? `job:${record.id}` : entry.group.id}
                   style={[
                     styles.recordRow,
                     { backgroundColor: colors.surface, borderColor: colors.border },

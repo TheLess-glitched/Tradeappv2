@@ -1,20 +1,25 @@
 import { router, useFocusEffect } from "expo-router";
 import { ArrowLeft, Search, ShoppingCart, X } from "lucide-react-native";
-import { useCallback, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { showDialog, showToast } from "../components/app-feedback";
 import SellModal, { SellModalItem } from "../components/sell-modal";
 import { formatCurrency } from "../constants/currency";
 import { supabase } from "../constants/supabase";
+import { CartLine, useCart } from "../context/cart-context";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
@@ -29,9 +34,160 @@ type TrackedCatalogueItem = {
   track_stock: boolean;
 };
 
+type QuickSellRowProps = {
+  item: TrackedCatalogueItem;
+  cartLine: CartLine | undefined;
+  colors: ReturnType<typeof useTheme>["colors"];
+  isLowStock: boolean;
+  onAdd: (item: TrackedCatalogueItem) => void;
+  onDecrement: (itemId: string, quantity: number) => void;
+  onEdit: (item: TrackedCatalogueItem) => void;
+  currency: ReturnType<typeof useTheme>["currency"];
+};
+
+const QuickSellRow = memo(function QuickSellRow({
+  item,
+  cartLine,
+  colors,
+  isLowStock,
+  onAdd,
+  onDecrement,
+  onEdit,
+  currency,
+}: QuickSellRowProps) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.itemCard,
+        {
+          backgroundColor: cartLine ? colors.surfaceHighlight : colors.surface,
+          borderColor: cartLine ? colors.primary : colors.border,
+        },
+        isLowStock && !cartLine && { borderColor: colors.danger },
+      ]}
+      onPress={() => {
+        if (item.quantity > 0) onAdd(item);
+      }}
+      activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Add ${item.name} to cart`}
+    >
+      <View style={styles.itemInfo}>
+        <Text style={[styles.itemName, { color: colors.text }]}>{item.name}</Text>
+        <Text style={[styles.itemPrice, { color: colors.textSecondary }]}>
+          {item.selling_price != null
+            ? formatCurrency(item.selling_price, currency)
+            : "No selling price"}
+        </Text>
+      </View>
+
+      <View style={styles.itemStockWrapper}>
+        <View
+          style={[
+            styles.stockBadge,
+            {
+              backgroundColor: isLowStock
+                ? colors.dangerSurface
+                : colors.surfaceSubtle,
+              borderColor: isLowStock ? colors.danger : colors.border,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.stockText,
+              {
+                color: isLowStock ? colors.dangerText : colors.primary,
+                fontWeight: "700",
+              },
+            ]}
+          >
+            {item.quantity} {item.unit || "units"}
+          </Text>
+        </View>
+        {isLowStock ? (
+          <Text style={[styles.lowStockLabel, { color: colors.dangerText }]}>
+            Low Stock
+          </Text>
+        ) : null}
+      </View>
+
+      {cartLine ? (
+        <View style={styles.stepper}>
+          <TouchableOpacity
+            style={[styles.stepperButton, { borderColor: colors.border }]}
+            onPress={() => onDecrement(item.id, cartLine.qty)}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove one ${item.name}`}
+          >
+            <Text style={[styles.stepperText, { color: colors.text }]}>−</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.quantityButton, { borderColor: colors.border }]}
+            onPress={() => onEdit(item)}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${item.name} quantity and price`}
+          >
+            <Text style={[styles.stepperText, { color: colors.text }]}>
+              {cartLine.qty}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.stepperButton, { borderColor: colors.border }]}
+            onPress={() => onAdd(item)}
+            disabled={item.quantity <= 0}
+            accessibilityState={{ disabled: item.quantity <= 0 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Add one ${item.name}`}
+          >
+            <Text
+              style={[
+                styles.stepperText,
+                { color: item.quantity <= 0 ? colors.textMuted : colors.text },
+              ]}
+            >
+              +
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View
+          style={[
+            styles.addButton,
+            {
+              backgroundColor: item.quantity <= 0 ? colors.surfaceSubtle : colors.primary,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.addButtonText,
+              { color: item.quantity <= 0 ? colors.textMuted : colors.primaryText },
+            ]}
+          >
+            +
+          </Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+
+});
+
 export default function QuickSellScreen() {
   const { businessId } = useAuth();
   const { colors, currency } = useTheme();
+  const {
+    items: cartItems,
+    itemCount,
+    total,
+    addOne,
+    setQty,
+    setAvailableStock,
+    setPrice,
+    remove,
+    clear,
+  } = useCart();
 
   const [items, setItems] = useState<TrackedCatalogueItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +195,13 @@ export default function QuickSellScreen() {
   const [search, setSearch] = useState("");
   const [selectedItem, setSelectedItem] = useState<SellModalItem | null>(null);
   const [sellModalVisible, setSellModalVisible] = useState(false);
+  const [reviewVisible, setReviewVisible] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  const [quantityEditId, setQuantityEditId] = useState<string | null>(null);
+  const [quantityDraft, setQuantityDraft] = useState("");
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
+  const [stockErrorItemId, setStockErrorItemId] = useState<string | null>(null);
 
   const fetchTrackedItems = useCallback(async () => {
     if (!hasDataRef.current) {
@@ -75,24 +238,248 @@ export default function QuickSellScreen() {
     }, [fetchTrackedItems]),
   );
 
-  const openSell = (item: TrackedCatalogueItem) => {
+  const handleAdd = useCallback(
+    (item: TrackedCatalogueItem) => {
+      const currentLine = cartItems.find((line) => line.itemId === item.id);
+      const atStockLimit = currentLine
+        ? currentLine.qty >= Math.floor(item.quantity)
+        : item.quantity < 1;
+      addOne(item);
+      if (atStockLimit) showToast(`Only ${Math.floor(item.quantity)} left`);
+    },
+    [addOne, cartItems],
+  );
+
+  const handleDecrement = useCallback(
+    (itemId: string, quantity: number) => setQty(itemId, quantity - 1),
+    [setQty],
+  );
+
+  const openCartEditor = useCallback((item: TrackedCatalogueItem) => {
     setSelectedItem(item);
     setSellModalVisible(true);
-  };
+  }, []);
 
-  const filteredItems = items.filter((item) =>
-    item.name.toLowerCase().includes(search.toLowerCase()),
+  const handleCartSave = useCallback(
+    (quantity: number, price: number) => {
+      if (!selectedItem) return;
+      if (quantity === 0) {
+        remove(selectedItem.id);
+        return;
+      }
+      addOne({
+        id: selectedItem.id,
+        name: selectedItem.name,
+        selling_price: selectedItem.selling_price ?? null,
+        quantity: selectedItem.quantity,
+      });
+      setQty(selectedItem.id, quantity);
+      setPrice(selectedItem.id, price);
+    },
+    [addOne, remove, selectedItem, setPrice, setQty],
+  );
+
+  const handleQuantityChange = useCallback(
+    (itemId: string, quantity: number) => setQty(itemId, quantity),
+    [setQty],
+  );
+
+  const commitQuantityDraft = useCallback(
+    (itemId: string) => {
+      const line = cartItems.find((cartLine) => cartLine.itemId === itemId);
+      const parsed = Number(quantityDraft);
+      if (
+        !line ||
+        quantityDraft.trim() === "" ||
+        !Number.isInteger(parsed) ||
+        parsed < 0
+      ) {
+        showToast("Enter a valid quantity");
+      } else {
+        if (parsed > line.availableStock) {
+          showToast(`Only ${line.availableStock} left`);
+        }
+        setQty(itemId, Math.min(parsed, line.availableStock));
+      }
+      setQuantityEditId(null);
+      setQuantityDraft("");
+    },
+    [cartItems, quantityDraft, setQty],
+  );
+
+  const handlePriceDraft = useCallback(
+    (itemId: string, value: string) => {
+      setPriceDrafts((current) => ({ ...current, [itemId]: value }));
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed > 0) setPrice(itemId, parsed);
+    },
+    [setPrice],
+  );
+
+  const commitPriceDraft = useCallback((itemId: string) => {
+    setPriceDrafts((current) => {
+      const next = { ...current };
+      delete next[itemId];
+      return next;
+    });
+  }, []);
+
+  const handleClearCart = useCallback(() => {
+    showDialog("Clear cart?", "Remove all items from this cart?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear cart",
+        style: "destructive",
+        onPress: () => {
+          clear();
+          setStockErrorItemId(null);
+          setPriceDrafts({});
+        },
+      },
+    ]);
+  }, [clear]);
+
+  const handleStockError = useCallback(
+    (error: { message: string; details?: string | null }) => {
+      if (error.message.startsWith("Not enough stock for")) {
+        let details: unknown;
+        try {
+          details = JSON.parse(error.details ?? "");
+        } catch {
+          showToast("Couldn't complete sale", error.message);
+          return;
+        }
+
+        if (
+          typeof details === "object" &&
+          details !== null &&
+          "catalogue_item_id" in details &&
+          typeof details.catalogue_item_id === "string" &&
+          "available" in details &&
+          typeof details.available === "number" &&
+          Number.isFinite(details.available)
+        ) {
+          const itemId = details.catalogue_item_id;
+          const available = Math.max(0, Math.floor(details.available));
+          setStockErrorItemId(itemId);
+          showDialog(
+            "Not enough stock",
+            `Only ${available} available. Update this cart line or remove it.`,
+            [
+              {
+                text: `Set to ${available} available`,
+                onPress: () => {
+                  setAvailableStock(itemId, available);
+                  setStockErrorItemId(null);
+                },
+              },
+              {
+                text: "Remove line",
+                style: "destructive",
+                onPress: () => {
+                  remove(itemId);
+                  setStockErrorItemId(null);
+                },
+              },
+            ],
+          );
+          return;
+        }
+      }
+      showToast("Couldn't complete sale", error.message);
+    },
+    [remove, setAvailableStock],
+  );
+
+  const completeCartSale = useCallback(async () => {
+    if (submittingRef.current || cartItems.length === 0) return;
+
+    const lines = cartItems.map((line) => {
+      const draft = priceDrafts[line.itemId];
+      const unitPrice = draft == null ? line.unitPrice : Number(draft);
+      return { line, unitPrice };
+    });
+    const invalidPrice = lines.find(
+      ({ unitPrice }) => !Number.isFinite(unitPrice) || unitPrice <= 0,
+    );
+    if (invalidPrice) {
+      showToast("Enter a valid price", invalidPrice.line.name);
+      return;
+    }
+
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.rpc("record_sale_cart", {
+        p_lines: lines.map(({ line, unitPrice }) => ({
+          catalogue_item_id: line.itemId,
+          quantity: line.qty,
+          unit_price: unitPrice,
+        })),
+      });
+      if (error) {
+        handleStockError(error);
+        return;
+      }
+
+      clear();
+      setPriceDrafts({});
+      setStockErrorItemId(null);
+      setReviewVisible(false);
+      showToast("Sale recorded");
+      await fetchTrackedItems();
+    } catch (error) {
+      showToast(
+        "Couldn't complete sale",
+        error instanceof Error ? error.message : "An unexpected error occurred.",
+      );
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  }, [cartItems, priceDrafts, handleStockError, clear, fetchTrackedItems]);
+
+  const cartById = useMemo(
+    () => new Map(cartItems.map((line) => [line.itemId, line])),
+    [cartItems],
+  );
+
+  const filteredItems = useMemo(
+    () =>
+      items.filter((item) =>
+        item.name.toLowerCase().includes(search.toLowerCase()),
+      ),
+    [items, search],
   );
 
   const isLowStock = (item: TrackedCatalogueItem) =>
     item.reorder_level > 0 && item.quantity <= item.reorder_level;
+
+  const renderItem = useCallback(
+    ({ item }: { item: TrackedCatalogueItem }) => (
+      <QuickSellRow
+        item={item}
+        cartLine={cartById.get(item.id)}
+        colors={colors}
+        currency={currency}
+        isLowStock={isLowStock(item)}
+        onAdd={handleAdd}
+        onDecrement={handleDecrement}
+        onEdit={openCartEditor}
+      />
+    ),
+    [cartById, colors, currency, handleAdd, handleDecrement, openCartEditor],
+  );
+
+  const selectedCartLine = selectedItem
+    ? cartById.get(selectedItem.id)
+    : undefined;
 
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home"))}
@@ -105,7 +492,6 @@ export default function QuickSellScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      {/* Search Bar */}
       <View
         style={[
           styles.searchBar,
@@ -132,7 +518,6 @@ export default function QuickSellScreen() {
         ) : null}
       </View>
 
-      {/* Item List */}
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={colors.primary} size="large" />
@@ -153,80 +538,258 @@ export default function QuickSellScreen() {
         </View>
       ) : (
         <FlatList
+          style={styles.listView}
           data={filteredItems}
+          extraData={cartItems}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[
-                styles.itemCard,
-                {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.border,
-                },
-                isLowStock(item) && {
-                  borderColor: colors.danger,
-                },
-              ]}
-              onPress={() => openSell(item)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.itemInfo}>
-                <Text style={[styles.itemName, { color: colors.text }]}>{item.name}</Text>
-                <Text style={[styles.itemPrice, { color: colors.textSecondary }]}>
-                  {item.selling_price != null
-                    ? formatCurrency(item.selling_price, currency)
-                    : "No selling price"}
-                </Text>
-              </View>
-
-              <View style={styles.itemStockWrapper}>
-                <View
-                  style={[
-                    styles.stockBadge,
-                    {
-                      backgroundColor: isLowStock(item)
-                        ? colors.dangerSurface
-                        : colors.surfaceSubtle,
-                      borderColor: isLowStock(item) ? colors.danger : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.stockText,
-                      {
-                        color: isLowStock(item) ? colors.dangerText : colors.primary,
-                        fontWeight: "700",
-                      },
-                    ]}
-                  >
-                    {item.quantity} {item.unit || "units"}
-                  </Text>
-                </View>
-                {isLowStock(item) ? (
-                  <Text style={[styles.lowStockLabel, { color: colors.dangerText }]}>
-                    Low Stock
-                  </Text>
-                ) : null}
-              </View>
-            </TouchableOpacity>
-          )}
+          renderItem={renderItem}
         />
       )}
 
-      {/* Shared Sell Modal */}
+      {itemCount > 0 ? (
+        <TouchableOpacity
+          style={[styles.cartBar, { backgroundColor: colors.primary }]}
+          onPress={() => setReviewVisible(true)}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={`Review ${itemCount} cart items, total ${formatCurrency(total, currency)}`}
+        >
+          <Text style={[styles.cartBarText, { color: colors.primaryText }]}>
+            {cartItems.length} items · {itemCount} units
+          </Text>
+          <Text style={[styles.reviewText, { color: colors.primaryText }]}>Review</Text>
+        </TouchableOpacity>
+      ) : null}
+
       <SellModal
         visible={sellModalVisible}
         item={selectedItem}
+        mode="cart"
+        initialQuantity={selectedCartLine?.qty}
+        initialPrice={selectedCartLine?.unitPrice}
+        maxQuantity={selectedItem?.quantity}
+        onCartSave={handleCartSave}
         onClose={() => {
           setSellModalVisible(false);
           setSelectedItem(null);
         }}
-        onComplete={fetchTrackedItems}
       />
+      <Modal
+        visible={reviewVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!submitting) setReviewVisible(false);
+        }}
+      >
+        <View style={[styles.reviewOverlay, { backgroundColor: colors.modalOverlay }]}>
+          <View
+            style={[
+              styles.reviewSheet,
+              { backgroundColor: colors.modalBackground, borderColor: colors.modalBorder },
+            ]}
+          >
+            <View style={styles.reviewHeader}>
+              <Text style={[styles.reviewTitle, { color: colors.text }]}>Review cart</Text>
+              <TouchableOpacity
+                style={styles.clearCartButton}
+                onPress={handleClearCart}
+                disabled={submitting || cartItems.length === 0}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.clearCartText, { color: colors.dangerText }]}>
+                  Clear cart
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.reviewLines}
+              contentContainerStyle={styles.reviewLinesContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {cartItems.map((line) => {
+                const priceText = priceDrafts[line.itemId] ?? line.unitPrice.toString();
+                const draftPrice = Number(priceText);
+                const displayPrice =
+                  Number.isFinite(draftPrice) && draftPrice > 0
+                    ? draftPrice
+                    : line.unitPrice;
+                return (
+                  <View
+                    key={line.itemId}
+                    style={[
+                      styles.reviewLine,
+                      {
+                        backgroundColor:
+                          stockErrorItemId === line.itemId
+                            ? colors.dangerSurface
+                            : colors.surface,
+                        borderColor:
+                          stockErrorItemId === line.itemId
+                            ? colors.danger
+                            : colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.reviewLineHeading}>
+                      <Text style={[styles.reviewItemName, { color: colors.text }]}>
+                        {line.name}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.removeLineButton}
+                        onPress={() => remove(line.itemId)}
+                        disabled={submitting}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${line.name}`}
+                      >
+                        <X size={18} color={colors.dangerText} />
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.reviewLineControls}>
+                      <View style={styles.reviewPriceWrap}>
+                        <Text style={[styles.reviewLabel, { color: colors.textSecondary }]}>
+                          Unit price
+                        </Text>
+                        <TextInput
+                          style={[
+                            styles.reviewPriceInput,
+                            {
+                              backgroundColor: colors.inputBackground,
+                              borderColor: colors.inputBorder,
+                              color: colors.inputText,
+                            },
+                          ]}
+                          value={priceText}
+                          onChangeText={(value) => handlePriceDraft(line.itemId, value)}
+                          onEndEditing={() => commitPriceDraft(line.itemId)}
+                          keyboardType="decimal-pad"
+                          selectTextOnFocus
+                          editable={!submitting}
+                          accessibilityLabel={`${line.name} unit price`}
+                        />
+                      </View>
+                      <View style={styles.reviewQuantityBlock}>
+                        <Text style={[styles.reviewLabel, { color: colors.textSecondary }]}>
+                          Quantity
+                        </Text>
+                        <View style={styles.stepper}>
+                          <TouchableOpacity
+                            style={[styles.stepperButton, { borderColor: colors.border }]}
+                            onPress={() => handleQuantityChange(line.itemId, line.qty - 1)}
+                            disabled={submitting}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove one ${line.name}`}
+                          >
+                            <Text style={[styles.stepperText, { color: colors.text }]}>−</Text>
+                          </TouchableOpacity>
+                          {quantityEditId === line.itemId ? (
+                            <TextInput
+                              style={[
+                                styles.reviewQuantityInput,
+                                {
+                                  backgroundColor: colors.inputBackground,
+                                  borderColor: colors.inputBorder,
+                                  color: colors.inputText,
+                                },
+                              ]}
+                              value={quantityDraft}
+                              onChangeText={setQuantityDraft}
+                              onBlur={() => commitQuantityDraft(line.itemId)}
+                              onSubmitEditing={() => Keyboard.dismiss()}
+                              returnKeyType="done"
+                              keyboardType="number-pad"
+                              autoFocus
+                              selectTextOnFocus
+                              editable={!submitting}
+                              accessibilityLabel={`${line.name} exact quantity`}
+                            />
+                          ) : (
+                            <TouchableOpacity
+                              style={[
+                                styles.quantityButton,
+                                { borderColor: colors.border },
+                              ]}
+                              onPress={() => {
+                                setQuantityDraft(line.qty.toString());
+                                setQuantityEditId(line.itemId);
+                              }}
+                              disabled={submitting}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Enter exact quantity for ${line.name}`}
+                            >
+                              <Text style={[styles.stepperText, { color: colors.text }]}>
+                                {line.qty}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity
+                            style={[
+                              styles.stepperButton,
+                              {
+                                borderColor: colors.border,
+                                opacity: line.qty >= line.availableStock ? 0.45 : 1,
+                              },
+                            ]}
+                            onPress={() =>
+                              handleQuantityChange(line.itemId, line.qty + 1)
+                            }
+                            disabled={submitting || line.qty >= line.availableStock}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Add one ${line.name}`}
+                          >
+                            <Text style={[styles.stepperText, { color: colors.text }]}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                    <Text style={[styles.lineTotal, { color: colors.text }]}>
+                      Line total: {formatCurrency(line.qty * displayPrice, currency)}
+                    </Text>
+                    {stockErrorItemId === line.itemId ? (
+                      <Text style={[styles.stockErrorText, { color: colors.dangerText }]}>
+                        Stock changed. Choose how to update this line.
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </ScrollView>
+
+            <View style={[styles.reviewFooter, { borderTopColor: colors.border }]}>
+              <View style={styles.totalRow}>
+                <Text style={[styles.totalLabel, { color: colors.textSecondary }]}>Total</Text>
+                <Text style={[styles.totalValue, { color: colors.text }]}>
+                  {formatCurrency(total, currency)}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.completeSaleButton,
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: submitting || cartItems.length === 0 ? 0.65 : 1,
+                  },
+                ]}
+                onPress={completeCartSale}
+                disabled={submitting || cartItems.length === 0}
+                accessibilityRole="button"
+              >
+                {submitting ? (
+                  <ActivityIndicator color={colors.primaryText} />
+                ) : (
+                  <Text style={[styles.completeSaleText, { color: colors.primaryText }]}>
+                    Complete sale ({formatCurrency(total, currency)})
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -282,20 +845,22 @@ const styles = StyleSheet.create({
   },
   emptyText: { fontSize: 17, fontWeight: "700", textAlign: "center" },
   emptySubtext: { fontSize: 13, textAlign: "center", lineHeight: 18 },
-  list: { paddingHorizontal: 20, paddingBottom: 32, gap: 10 },
+  listView: { flex: 1 },
+  list: { paddingHorizontal: 20, paddingBottom: 16, gap: 10 },
   itemCard: {
+    minHeight: 72,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
   },
-  itemInfo: { flex: 1, marginRight: 12 },
+  itemInfo: { flex: 1, marginRight: 8 },
   itemName: { fontSize: 15, fontWeight: "700", marginBottom: 4 },
   itemPrice: { fontSize: 13, fontWeight: "500" },
-  itemStockWrapper: { alignItems: "flex-end" },
+  itemStockWrapper: { alignItems: "flex-end", marginRight: 8 },
   stockBadge: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -308,4 +873,129 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 4,
   },
+  stepper: { flexDirection: "row", alignItems: "center" },
+  stepperButton: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  quantityButton: {
+    minWidth: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    marginHorizontal: 4,
+  },
+  stepperText: { fontSize: 18, fontWeight: "700" },
+  addButton: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+  },
+  addButtonText: { fontSize: 24, fontWeight: "600" },
+  cartBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    minHeight: 64,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+  },
+  cartBarText: { fontSize: 15, fontWeight: "700" },
+  reviewText: { fontSize: 15, fontWeight: "700" },
+  reviewOverlay: { flex: 1, justifyContent: "flex-end" },
+  reviewSheet: {
+    maxHeight: "88%",
+    borderWidth: 1,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingBottom: 24,
+  },
+  reviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  reviewTitle: { fontSize: 20, fontWeight: "700" },
+  clearCartButton: {
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+  clearCartText: { fontSize: 14, fontWeight: "700" },
+  reviewLines: { flexShrink: 1 },
+  reviewLinesContent: { paddingHorizontal: 16, paddingBottom: 12, gap: 10 },
+  reviewLine: { borderWidth: 1, borderRadius: 14, padding: 12 },
+  reviewLineHeading: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  reviewItemName: { flex: 1, fontSize: 15, fontWeight: "700" },
+  removeLineButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reviewLineControls: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+  },
+  reviewPriceWrap: { flex: 1, marginRight: 10 },
+  reviewLabel: { fontSize: 12, fontWeight: "600", marginBottom: 6 },
+  reviewPriceInput: {
+    height: 48,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    fontSize: 15,
+  },
+  reviewQuantityBlock: { alignItems: "flex-start" },
+  reviewQuantityInput: {
+    width: 48,
+    height: 48,
+    borderWidth: 1,
+    borderRadius: 10,
+    textAlign: "center",
+    marginHorizontal: 4,
+  },
+  lineTotal: { fontSize: 14, fontWeight: "700", textAlign: "right", marginTop: 10 },
+  stockErrorText: { fontSize: 12, fontWeight: "600", marginTop: 6 },
+  reviewFooter: {
+    borderTopWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    marginTop: 4,
+  },
+  totalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  totalLabel: { fontSize: 15, fontWeight: "600" },
+  totalValue: { fontSize: 20, fontWeight: "800" },
+  completeSaleButton: {
+    minHeight: 52,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  completeSaleText: { fontSize: 15, fontWeight: "700", textAlign: "center" },
 });

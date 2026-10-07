@@ -27,6 +27,11 @@ interface SellModalProps {
   item: SellModalItem | null;
   onClose: () => void;
   onComplete?: () => void;
+  mode?: "sale" | "cart";
+  initialQuantity?: number;
+  initialPrice?: number;
+  maxQuantity?: number;
+  onCartSave?: (quantity: number, price: number) => void;
 }
 
 type SaleDraft = {
@@ -40,6 +45,11 @@ export default function SellModal({
   item,
   onClose,
   onComplete,
+  mode = "sale",
+  initialQuantity,
+  initialPrice,
+  maxQuantity,
+  onCartSave,
 }: SellModalProps) {
   const { colors, currency } = useTheme();
 
@@ -47,11 +57,17 @@ export default function SellModal({
   const [loading, setLoading] = useState(false);
 
   const quantity =
-    saleDraft && saleDraft.itemId === item?.id ? saleDraft.quantity : "1";
+    saleDraft && saleDraft.itemId === item?.id
+      ? saleDraft.quantity
+      : mode === "cart" && initialQuantity != null
+        ? initialQuantity.toString()
+        : "1";
   const price =
     saleDraft && saleDraft.itemId === item?.id
       ? saleDraft.price
-      : item?.selling_price != null
+      : mode === "cart" && initialPrice != null
+        ? initialPrice.toString()
+        : item?.selling_price != null
         ? item.selling_price.toString()
         : "";
 
@@ -61,11 +77,18 @@ export default function SellModal({
     if (!item) return;
     setSaleDraft((current) => ({
       itemId: item.id,
-      quantity: current?.itemId === item.id ? current.quantity : "1",
+      quantity:
+        current?.itemId === item.id
+          ? current.quantity
+          : mode === "cart" && initialQuantity != null
+            ? initialQuantity.toString()
+            : "1",
       price:
         current?.itemId === item.id
           ? current.price
-          : item.selling_price != null
+          : mode === "cart" && initialPrice != null
+            ? initialPrice.toString()
+            : item.selling_price != null
             ? item.selling_price.toString()
             : "",
       ...updates,
@@ -82,14 +105,24 @@ export default function SellModal({
     if (!item) return;
 
     const parsedQty = parseInt(quantity.replace(/[^0-9]/g, ""), 10);
-    if (!parsedQty || parsedQty <= 0) {
+    if (!Number.isFinite(parsedQty) || parsedQty < 0 || (mode === "sale" && parsedQty === 0)) {
       showFeedback("Invalid quantity", "Please enter a valid quantity greater than 0.");
+      return;
+    }
+    if (mode === "cart" && maxQuantity != null && parsedQty > maxQuantity) {
+      showFeedback("Stock Error", `Only ${maxQuantity} available`);
       return;
     }
 
     const parsedPrice = parseFloat(price.replace(/[^0-9.]/g, "")) || 0;
-    if (!parsedPrice || parsedPrice <= 0) {
+    if (parsedQty > 0 && (!parsedPrice || parsedPrice <= 0)) {
       showFeedback("Invalid price", "Please enter a valid price greater than 0.");
+      return;
+    }
+
+    if (mode === "cart") {
+      onCartSave?.(parsedQty, parsedPrice);
+      handleClose();
       return;
     }
 
@@ -152,7 +185,7 @@ export default function SellModal({
         >
           <View style={styles.modalHeader}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Sell — {item?.name}
+              {mode === "cart" ? "Update cart" : "Sell"} — {item?.name}
             </Text>
             <TouchableOpacity onPress={handleClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <X size={22} color={colors.textSecondary} />
@@ -211,7 +244,7 @@ export default function SellModal({
               <ActivityIndicator color={colors.primaryText} />
             ) : (
               <Text style={[styles.saveButtonText, { color: colors.primaryText }]}>
-                Complete Sale
+                {mode === "cart" ? "Update cart" : "Complete Sale"}
               </Text>
             )}
           </TouchableOpacity>

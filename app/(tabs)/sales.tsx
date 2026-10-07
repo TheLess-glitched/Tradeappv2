@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from "expo-router";
 import { Plus, ShoppingCart } from "lucide-react-native";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
@@ -10,12 +10,14 @@ import {
     View,
 } from "react-native";
 import { showFeedback, showToast } from "../../components/app-feedback";
+import SaleGroupCard from "../../components/sale-group-card";
 import VoidRecordDialog from "../../components/void-record-dialog";
 import { formatCurrency } from "../../constants/currency";
 import { supabase } from "../../constants/supabase";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
 import { getJobProfit } from "../../hooks/use-todays-jobs";
+import { groupSaleRows } from "../../hooks/sale-groups";
 
 type Sale = {
   id: number;
@@ -31,6 +33,7 @@ type Sale = {
   created_at: string;
   created_by: string | null;
   created_by_name: string | null;
+  sale_group_id: string | null;
   voided_at: string | null;
   void_reason: string | null;
 };
@@ -53,19 +56,31 @@ export default function SalesScreen() {
     }
 
     setLoading(true);
-    const { data, error } = await supabase
-      .from("jobs")
-      .select("id, service, quantity, unit_price, unit_cost, price, line_total, catalogue_item_id, date, time, created_at, created_by, created_by_name, voided_at, void_reason")
-      .eq("business_id", businessId)
-      .eq("record_type", "sale")
-      .order("created_at", { ascending: false });
+    const pageSize = 500;
+    const allSales: Sale[] = [];
+    let offset = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("jobs")
+        .select("id, service, quantity, unit_price, unit_cost, price, line_total, catalogue_item_id, date, time, created_at, created_by, created_by_name, sale_group_id, voided_at, void_reason")
+        .eq("business_id", businessId)
+        .eq("record_type", "sale")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + pageSize - 1);
 
-    if (error) {
-      showFeedback("Error", error.message);
-      setSales([]);
-    } else {
-      setSales(data ?? []);
+      if (error) {
+        showFeedback("Error", error.message);
+        setSales([]);
+        setLoading(false);
+        return;
+      }
+
+      allSales.push(...(data ?? []));
+      if ((data?.length ?? 0) < pageSize) break;
+      offset += pageSize;
     }
+    setSales(allSales);
     setLoading(false);
   }, [businessId, isSessionReady, session?.user?.id]);
 
@@ -75,8 +90,19 @@ export default function SalesScreen() {
     }, [fetchSales]),
   );
 
-  const filteredSales = sales.filter((sale) =>
-    filter === "voided" ? sale.voided_at != null : sale.voided_at == null,
+  const saleGroups = useMemo(
+    () =>
+      groupSaleRows(sales).sort(
+        (left, right) =>
+          new Date(right.earliestTimestamp).getTime() -
+          new Date(left.earliestTimestamp).getTime(),
+      ),
+    [sales],
+  );
+  const filteredSales = saleGroups.filter((group) =>
+    filter === "voided"
+      ? group.lines.some((line) => line.voided_at != null)
+      : group.lines.some((line) => line.voided_at == null),
   );
 
   const renderSale = ({ item: sale }: { item: Sale }) => {
@@ -188,8 +214,20 @@ export default function SalesScreen() {
       ) : (
         <FlatList
           data={filteredSales}
-          keyExtractor={(sale) => String(sale.id)}
-          renderItem={renderSale}
+          keyExtractor={(group) => group.id}
+          renderItem={({ item: group }) =>
+            group.lines.length > 1 ? (
+              <SaleGroupCard
+                group={group}
+                colors={colors}
+                currency={currency}
+                isOwner={isOwner}
+                onVoid={(line) => setSaleToVoid(line)}
+              />
+            ) : (
+              renderSale({ item: group.lines[0] })
+            )
+          }
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
