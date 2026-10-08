@@ -18,6 +18,7 @@ import {
     View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
+import CompletedJobRow from "../components/completed-job-row";
 import SaleGroupCard from "../components/sale-group-card";
 import StatCard from "../components/stat-card";
 import { formatCurrency } from "../constants/currency";
@@ -25,12 +26,6 @@ import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 import { getJobProfit, useTodaysJobs } from "../hooks/use-todays-jobs";
 import { groupSaleRows } from "../hooks/sale-groups";
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Pending",
-  in_progress: "In Progress",
-  done: "Completed",
-};
 
 export default function DailyCloseScreen() {
   const { colors, currency } = useTheme();
@@ -225,7 +220,19 @@ export default function DailyCloseScreen() {
             {isWorker ? "My Day" : "End of Day Wrap-up"}
           </Text>
         </View>
-        <View style={styles.headerSpacer} />
+        {isOwner ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={() => router.push("/history" as any)}
+            style={styles.historyButton}
+          >
+            <Text style={[styles.historyButtonText, { color: colors.primary }]}>
+              History
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerSpacer} />
+        )}
       </View>
 
       {loading ? (
@@ -476,11 +483,20 @@ export default function DailyCloseScreen() {
               }
               const record =
                 entry.kind === "job" ? entry.record : entry.group.lines[0];
-              const isSale = entry.kind === "sale";
-              const profit = isSale ? getJobProfit(record) : null;
-              const statusText = isSale
-                ? "Sold"
-                : STATUS_LABELS[record.status] ?? record.status;
+              if (entry.kind === "job") {
+                return (
+                  <CompletedJobRow
+                    key={`job:${record.id}`}
+                    job={record}
+                    colors={colors}
+                    currency={currency}
+                    isOwner={isOwner}
+                    statusColor={colors.statusInProgress}
+                  />
+                );
+              }
+              const profit = getJobProfit(record);
+              const statusText = "Sold";
               const time = new Date(record.created_at).toLocaleTimeString([], {
                 hour: "numeric",
                 minute: "2-digit",
@@ -488,7 +504,7 @@ export default function DailyCloseScreen() {
 
               return (
                 <View
-                  key={entry.kind === "job" ? `job:${record.id}` : entry.group.id}
+                  key={entry.group.id}
                   style={[
                     styles.recordRow,
                     { backgroundColor: colors.surface, borderColor: colors.border },
@@ -501,13 +517,11 @@ export default function DailyCloseScreen() {
                     <Text style={[styles.recordSubtitle, { color: colors.textMuted }]}>
                       {record.service} · {time}
                     </Text>
-                    {isSale ? (
-                      <Text style={[styles.recordDetail, { color: colors.textSecondary }]}>
-                        {isOwner
-                          ? `Quantity ${record.quantity} · Profit ${profit == null ? "—" : formatCurrency(profit, currency)}`
-                          : `Quantity ${record.quantity}`}
-                      </Text>
-                    ) : null}
+                    <Text style={[styles.recordDetail, { color: colors.textSecondary }]}>
+                      {isOwner
+                        ? `Quantity ${record.quantity} · Profit ${profit == null ? "—" : formatCurrency(profit, currency)}`
+                        : `Quantity ${record.quantity}`}
+                    </Text>
                     {isOwner && record.created_by_name ? (
                       <Text style={[styles.recordSubtitle, { color: colors.textMuted }]}>
                         by {record.created_by_name}
@@ -522,19 +536,15 @@ export default function DailyCloseScreen() {
                       style={[
                         styles.statusBadge,
                         {
-                          backgroundColor: isSale
-                            ? `${colors.statusDone}18`
-                            : `${colors.statusInProgress}18`,
+                          backgroundColor: `${colors.statusDone}18`,
                         },
                       ]}
                     >
-                      {isSale ? (
-                        <CheckCircle2 size={12} color={colors.statusDone} />
-                      ) : null}
+                      <CheckCircle2 size={12} color={colors.statusDone} />
                       <Text
                         style={[
                           styles.statusText,
-                          { color: isSale ? colors.statusDone : colors.statusInProgress },
+                          { color: colors.statusDone },
                         ]}
                       >
                         {statusText}
@@ -614,6 +624,8 @@ const styles = StyleSheet.create({
   backButton: { width: 40, height: 40, justifyContent: "center" },
   headerCopy: { flex: 1 },
   headerSpacer: { width: 40 },
+  historyButton: { minHeight: 40, justifyContent: "center", paddingHorizontal: 4 },
+  historyButtonText: { fontSize: 14, fontWeight: "700" },
   headerTitle: { fontSize: 20, fontWeight: "700" },
   dateText: { fontSize: 12, fontWeight: "500", marginBottom: 2 },
   scroll: { paddingHorizontal: 20, paddingBottom: 40 },

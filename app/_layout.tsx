@@ -155,6 +155,7 @@ function RootNavigator() {
           <Stack.Screen name="team" />
           <Stack.Screen name="join-business" />
           <Stack.Screen name="daily-close" />
+          <Stack.Screen name="history" />
           <Stack.Screen name="notes" />
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="modal" />
