@@ -2,17 +2,23 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import {
     ArrowLeft,
+    Check,
+    ChevronDown,
     ChevronRight,
     KeyRound,
     LogOut,
     Moon,
+    Search,
     Smartphone,
     Sun,
+    X,
 } from "lucide-react-native";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
+    FlatList,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -40,6 +46,7 @@ export default function SettingsScreen() {
     "Hi {name}, your job is completed and ready!",
   );
   const [currencyModalVisible, setCurrencyModalVisible] = useState(false);
+  const [currencySearch, setCurrencySearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState("");
@@ -74,6 +81,25 @@ export default function SettingsScreen() {
     const timer = setTimeout(() => void loadSettings(), 0);
     return () => clearTimeout(timer);
   }, [loadSettings]);
+
+  const currencyOptions = useMemo(
+    () =>
+      (Object.entries(CURRENCIES) as [
+        CurrencyCode,
+        (typeof CURRENCIES)[CurrencyCode],
+      ][]).map(([code, meta]) => ({ code, ...meta })),
+    [],
+  );
+  const filteredCurrencies = useMemo(() => {
+    const query = currencySearch.trim().toLowerCase();
+    if (!query) return currencyOptions;
+    return currencyOptions.filter(
+      ({ code, name, symbol }) =>
+        name.toLowerCase().includes(query) ||
+        code.toLowerCase().includes(query) ||
+        symbol.toLowerCase().includes(query),
+    );
+  }, [currencyOptions, currencySearch]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -160,14 +186,10 @@ export default function SettingsScreen() {
     { key: "dark", label: "Dark", icon: Moon },
   ];
 
-  const currencyOptions = (Object.entries(CURRENCIES) as [CurrencyCode, (typeof CURRENCIES)[CurrencyCode]][]).map(([code, meta]) => ({
-    key: code,
-    label: `${meta.name} (${meta.symbol})`,
-  }));
-
   const handleCurrencyPress = (code: CurrencyCode) => {
     setCurrency(code);
-    setCurrencyModalVisible(true);
+    setCurrencyModalVisible(false);
+    setCurrencySearch("");
   };
 
   return (
@@ -301,43 +323,39 @@ export default function SettingsScreen() {
             },
           ]}
         >
-          <View style={styles.themeToggleRow}>
-            {currencyOptions.map((opt) => {
-              const isSelected = currency === opt.key;
-              return (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={[
-                    styles.themeOptionBtn,
-                    {
-                      backgroundColor: isSelected
-                        ? isDark
-                          ? colors.surfaceHighlight
-                          : colors.secondarySurface
-                        : colors.inputBackground,
-                      borderColor: isSelected
-                        ? colors.primary
-                        : colors.inputBorder,
-                    },
-                  ]}
-                  onPress={() => handleCurrencyPress(opt.key)}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.themeOptionText,
-                      {
-                        color: isSelected ? colors.text : colors.textSecondary,
-                        fontWeight: isSelected ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+          <TouchableOpacity
+            style={[
+              styles.currencyField,
+              {
+                backgroundColor: colors.inputBackground,
+                borderColor: colors.inputBorder,
+              },
+            ]}
+            onPress={() => setCurrencyModalVisible(true)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Currency: ${CURRENCIES[currency].name}, ${currency}, ${CURRENCIES[currency].symbol}`}
+          >
+            <Text
+              style={[styles.currencyFieldName, { color: colors.text }]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {CURRENCIES[currency].name}
+            </Text>
+            <View style={styles.currencyFieldAside}>
+              <Text style={[styles.currencyFieldCode, { color: colors.textSecondary }]}>
+                {currency}
+              </Text>
+              <Text style={[styles.currencyFieldSymbol, { color: colors.text }]}>
+                {CURRENCIES[currency].symbol}
+              </Text>
+              <ChevronDown size={18} color={colors.textMuted} />
+            </View>
+          </TouchableOpacity>
+          <Text style={[styles.currencyHelper, { color: colors.textMuted }]}>
+            Changes the symbol only. Amounts are not converted.
+          </Text>
         </View>
         </> : null}
 
@@ -524,8 +542,11 @@ export default function SettingsScreen() {
       <Modal
         visible={currencyModalVisible}
         transparent
-        animationType="fade"
-        onRequestClose={() => setCurrencyModalVisible(false)}
+        animationType="slide"
+        onRequestClose={() => {
+          setCurrencyModalVisible(false);
+          setCurrencySearch("");
+        }}
       >
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <View
@@ -537,18 +558,98 @@ export default function SettingsScreen() {
               },
             ]}
           >
-            <Text style={[styles.currencyModalTitle, { color: colors.text }]}>
-              {CURRENCIES[currency as keyof typeof CURRENCIES]?.name} ✓
-            </Text>
-            <Text style={[styles.currencyModalText, { color: colors.textSecondary }]}>
-              More currencies are coming soon.
-            </Text>
-            <TouchableOpacity
-              style={[styles.currencyModalButton, { backgroundColor: colors.primary }]}
-              onPress={() => setCurrencyModalVisible(false)}
+            <View style={styles.currencyModalHeader}>
+              <Text style={[styles.currencyModalTitle, { color: colors.text }]}>
+                Select Currency
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setCurrencyModalVisible(false);
+                  setCurrencySearch("");
+                }}
+                style={styles.closeBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Close currency picker"
+              >
+                <X size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View
+              style={[
+                styles.searchBox,
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.inputBorder,
+                },
+              ]}
             >
-              <Text style={[styles.currencyModalButtonText, { color: colors.primaryText }]}>Close</Text>
-            </TouchableOpacity>
+              <Search size={18} color={colors.textMuted} style={styles.searchIcon} />
+              <TextInput
+                style={[styles.searchInput, { color: colors.inputText }]}
+                placeholder="Search currency or code..."
+                placeholderTextColor={colors.placeholder}
+                value={currencySearch}
+                onChangeText={setCurrencySearch}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {currencySearch.length > 0 ? (
+                <TouchableOpacity
+                  onPress={() => setCurrencySearch("")}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear currency search"
+                >
+                  <X size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            <FlatList
+              data={filteredCurrencies}
+              keyExtractor={(item) => item.code}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <Text style={[styles.emptyCurrencyText, { color: colors.textMuted }]}>
+                  No currencies found
+                </Text>
+              }
+              renderItem={({ item }) => {
+                const isSelected = item.code === currency;
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.currencyItem,
+                      isSelected && { backgroundColor: colors.surfaceHighlight },
+                    ]}
+                    onPress={() => handleCurrencyPress(item.code)}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[styles.currencyItemName, { color: colors.text }]}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {item.name}
+                    </Text>
+                    <View style={styles.currencyItemAside}>
+                      <Text style={[styles.currencyItemCode, { color: colors.textSecondary }]}>
+                        {item.code}
+                      </Text>
+                      <Text style={[styles.currencyItemSymbol, { color: colors.text }]}>
+                        {item.symbol}
+                      </Text>
+                      {isSelected ? (
+                        <Check size={18} color={colors.primary} />
+                      ) : (
+                        <View style={styles.currencyItemCheckSpace} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              }}
+            />
           </View>
         </View>
       </Modal>
@@ -612,10 +713,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
   },
-  themeToggleRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
+  themeToggleRow: { flexDirection: "row", gap: 10 },
   themeOptionBtn: {
     flex: 1,
     flexDirection: "row",
@@ -661,40 +759,78 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 8,
   },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 24,
-  },
+  modalOverlay: { flex: 1, justifyContent: "flex-end" },
   currencyModal: {
     width: "100%",
-    maxWidth: 360,
-    borderRadius: 16,
+    maxHeight: "80%",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     borderWidth: 1,
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: Platform.OS === "ios" ? 36 : 24,
+  },
+  currencyModalHeader: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
   },
   currencyModalTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: "700",
-    marginBottom: 8,
   },
-  currencyModalText: {
-    fontSize: 14,
-    textAlign: "center",
-    marginBottom: 18,
-    lineHeight: 22,
-  },
-  currencyModalButton: {
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    width: "100%",
+  closeBtn: { padding: 6 },
+  searchBox: {
+    flexDirection: "row",
     alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
   },
-  currencyModalButtonText: {
-    fontSize: 14,
-    fontWeight: "700",
+  searchIcon: { marginRight: 8 },
+  searchInput: { flex: 1, fontSize: 14 },
+  currencyField: {
+    minHeight: 50,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
+  currencyFieldName: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "600" },
+  currencyFieldAside: {
+    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginLeft: 12,
+  },
+  currencyFieldCode: { fontSize: 13, fontWeight: "600" },
+  currencyFieldSymbol: { fontSize: 16, fontWeight: "700" },
+  currencyHelper: { fontSize: 11, marginTop: 8 },
+  currencyItem: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginBottom: 4,
+  },
+  currencyItemName: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "500" },
+  currencyItemAside: {
+    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginLeft: 12,
+  },
+  currencyItemCode: { fontSize: 13, fontWeight: "600" },
+  currencyItemSymbol: { minWidth: 28, textAlign: "right", fontSize: 15, fontWeight: "600" },
+  currencyItemCheckSpace: { width: 18 },
+  emptyCurrencyText: { paddingVertical: 20, textAlign: "center", fontSize: 14 },
 });

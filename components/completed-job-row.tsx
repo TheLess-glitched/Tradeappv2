@@ -32,7 +32,7 @@ export default function CompletedJobRow({
   statusColor?: string;
 }) {
   const statusStyles = getStatusStyle(colors, job.status);
-  const time = new Date(job.created_at).toLocaleTimeString([], {
+  const time = new Date(job.created_at).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
   });
@@ -45,11 +45,11 @@ export default function CompletedJobRow({
       ]}
     >
       <View style={styles.recordMain}>
-        <Text style={[styles.recordTitle, { color: colors.text }]}>
+        <Text style={[styles.recordTitle, { color: colors.text }]} numberOfLines={1}>
           {job.customer_name || job.service}
         </Text>
         <Text style={[styles.recordSubtitle, { color: colors.textMuted }]}>
-          {job.service} · {time}
+          {job.service} · {formatCurrency(job.line_total ?? 0, currency)}
         </Text>
         {isOwner && job.created_by_name ? (
           <Text style={[styles.recordSubtitle, { color: colors.textMuted }]}>
@@ -58,9 +58,6 @@ export default function CompletedJobRow({
         ) : null}
       </View>
       <View style={styles.recordAside}>
-        <Text style={[styles.recordAmount, { color: colors.text }]}>
-          {formatCurrency(job.line_total ?? 0, currency)}
-        </Text>
         <View
           style={[
             styles.statusBadge,
@@ -75,6 +72,7 @@ export default function CompletedJobRow({
             {STATUS_LABELS[job.status] ?? job.status}
           </Text>
         </View>
+        <Text style={[styles.time, { color: colors.textSecondary }]}>{time}</Text>
       </View>
     </View>
   );
@@ -94,8 +92,8 @@ const styles = StyleSheet.create({
   recordMain: { flex: 1, minWidth: 0 },
   recordTitle: { fontSize: 14, fontWeight: "700" },
   recordSubtitle: { fontSize: 12, marginTop: 3 },
-  recordAside: { alignItems: "flex-end", flexShrink: 0 },
-  recordAmount: { fontSize: 14, fontWeight: "700" },
+  recordAside: { alignItems: "flex-end", flexShrink: 0, marginLeft: 12 },
+  time: { fontSize: 11, marginTop: 4 },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -103,7 +101,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
-    marginTop: 5,
   },
   statusText: { fontSize: 11, fontWeight: "600" },
 });

@@ -71,12 +71,8 @@ export function groupSaleRows<T extends SaleGroupLine>(
 }
 
 export function describeSaleGroup<T extends SaleGroupLine>(
-  group: SaleGroup<T>,
-  maxItems = 3,
+  group: SaleGroup<T>
 ) {
-  const visible = group.lines.slice(0, maxItems).map(
-    (line) => `${line.service} x${line.quantity}`,
-  );
-  const remaining = group.lines.length - visible.length;
-  return `${visible.join(", ")}${remaining > 0 ? ` +${remaining} more` : ""}`;
+  return group.lines.map((line) => `${line.service} x${line.quantity}`).join(", ");
 }
+ 

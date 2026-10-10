@@ -1,44 +1,54 @@
 import { router, useFocusEffect } from "expo-router";
 import {
-    Bell,
-    Briefcase,
-    FileText,
-    FlaskConical,
-    Menu,
-    Plus,
-    Settings,
-    Shield,
-    ShoppingCart,
-    UserPlus,
-    Users,
-    X,
+  Bell,
+  Briefcase,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  FlaskConical,
+  Menu,
+  Plus,
+  Settings,
+  Shield,
+  ShoppingCart,
+  UserPlus,
+  Users,
+  X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    Animated,
-    Dimensions,
-    FlatList,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Animated,
+  Dimensions,
+  FlatList,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
-import { showFeedback } from "../../components/app-feedback";
+import { showFeedback, showToast } from "../../components/app-feedback";
 import StatCard from "../../components/stat-card";
 import { formatCurrency } from "../../constants/currency";
+import { plural } from "../../constants/plural";
 import { supabase } from "../../constants/supabase";
 import { getStatusStyle } from "../../constants/theme";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
-import { useTodaysJobs } from "../../hooks/use-todays-jobs";
 import { describeSaleGroup, groupSaleRows, SaleGroup } from "../../hooks/sale-groups";
+import { useOpenJobs } from "../../hooks/use-open-jobs";
+import { useTodaysJobs } from "../../hooks/use-todays-jobs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
+const PAGE_SIZE = 100;
+
+
+type NotificationListRow =
+  | { kind: "header"; key: string; title: string }
+  | { kind: "notification"; key: string; notification: NotificationItem };
 
 type Job = {
   id: number;
@@ -75,9 +85,71 @@ const STATUS_LABELS = {
   done: "Completed",
 };
 
+function getLagosDayKey(value: string): string {
+  const shifted = new Date(new Date(value).getTime() + 3_600_000);
+  return [
+    shifted.getUTCFullYear(),
+    String(shifted.getUTCMonth() + 1).padStart(2, "0"),
+    String(shifted.getUTCDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function getLagosTodayKey(): string {
+  return getLagosDayKey(new Date().toISOString());
+}
+
+function getLagosCurrentMonth(): { year: number; month: number } {
+  const shifted = new Date(Date.now() + 3_600_000);
+  return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
+}
+
+function getMonthBounds(year: number, month: number) {
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 1));
+  const formatDay = (date: Date) =>
+    `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+  return {
+    start: `${formatDay(start)}T00:00:00+01:00`,
+    end: `${formatDay(end)}T00:00:00+01:00`,
+  };
+}
+
+function getLagosTime(value: string): string {
+  const shifted = new Date(new Date(value).getTime() + 3_600_000);
+  const hour = shifted.getUTCHours();
+  const minute = String(shifted.getUTCMinutes()).padStart(2, "0");
+  return `${hour % 12 || 12}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
+}
+
+function formatNotificationDay(day: string, todayKey: string): string {
+  const [year, month, date] = day.split("-").map(Number);
+  const [todayYear, todayMonth, todayDate] = todayKey.split("-").map(Number);
+  const dayTimestamp = Date.UTC(year, month - 1, date);
+  const todayTimestamp = Date.UTC(todayYear, todayMonth - 1, todayDate);
+  const daysAgo = (todayTimestamp - dayTimestamp) / 86_400_000;
+
+  if (daysAgo === 0) return "Today";
+  if (daysAgo === 1) return "Yesterday";
+  const utcDate = new Date(Date.UTC(year, month - 1, date));
+  const weekday = new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    timeZone: "UTC",
+  }).format(utcDate);
+  const dayOfMonth = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(utcDate);
+  const monthName = new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    timeZone: "UTC",
+  }).format(utcDate);
+  return `${weekday} ${dayOfMonth} ${monthName}`;
+}
+
 export default function CommandCenter() {
   const { colors, currency } = useTheme();
   const { session, isSessionReady, businessId, role } = useAuth();
+  const userId = session?.user?.id;
   const isOwner = role === "owner";
   const isWorker = role === "worker";
   const { totalRevenue, completedJobsToday, salesCompletedToday } = useTodaysJobs();
@@ -100,8 +172,16 @@ export default function CommandCenter() {
   const hasDataRef = useRef(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [notificationsError, setNotificationsError] = useState(false);
+  const [hasMoreNotifications, setHasMoreNotifications] = useState(false);
+  const notificationRequestRef = useRef(0);
+  const notificationOffsetRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const [notificationMonth, setNotificationMonth] =
+    useState(getLagosCurrentMonth);
   const [notifModalOpen, setNotifModalOpen] = useState(false);
-  const hasNotifsRef = useRef(false);
   const isCheckingRemindersRef = useRef(false);
   const handledReminderIdsRef = useRef<Set<number>>(new Set());
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -198,23 +278,29 @@ export default function CommandCenter() {
 
   const handleOpenNotifications = useCallback(async () => {
     setNotifModalOpen(true);
-    if (unreadCount > 0 && session?.user?.id) {
+    if (userId) {
       setUnreadCount(0);
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
 
       try {
-        await supabase
+        const { error } = await supabase
           .from("notifications")
           .update({ is_read: true })
+          .eq("user_id", userId)
           .eq("is_read", false);
-      } catch {
+        if (error) throw error;
+      } catch (error) {
+        showToast(
+          "Couldn't mark notifications as read",
+          error instanceof Error ? error.message : "Please try again.",
+        );
       }
     }
-  }, [session?.user?.id, unreadCount]);
+  }, [userId]);
 
   const markRemindersAsRead = useCallback(
     async (reminderIds: number[]) => {
-      if (reminderIds.length === 0 || !session?.user?.id) return;
+      if (reminderIds.length === 0 || !userId) return;
       const idSet = new Set(reminderIds);
       setNotifications((prev) =>
         prev.map((n) => (idSet.has(n.id) ? { ...n, is_read: true } : n)),
@@ -222,14 +308,20 @@ export default function CommandCenter() {
       setUnreadCount((prev) => Math.max(0, prev - reminderIds.length));
 
       try {
-        await supabase
+        const { error } = await supabase
           .from("notifications")
           .update({ is_read: true })
+          .eq("user_id", userId)
           .in("id", reminderIds);
-      } catch {
+        if (error) throw error;
+      } catch (error) {
+        showToast(
+          "Couldn't mark reminders as read",
+          error instanceof Error ? error.message : "Please try again.",
+        );
       }
     },
-    [session?.user?.id],
+    [userId],
   );
 
   const checkUnreadDeadlineReminders = useCallback(
@@ -294,51 +386,119 @@ export default function CommandCenter() {
     [handleOpenNotifications, markRemindersAsRead],
   );
 
-  const fetchNotifications = useCallback(async () => {
-    if (!session?.user?.id) {
+  const fetchNotifications = useCallback(async (loadMore = false) => {
+    if (!userId) {
       setNotifications([]);
       setUnreadCount(0);
+      setHasMoreNotifications(false);
+      setNotificationsError(false);
+      notificationOffsetRef.current = 0;
       return;
     }
+    if (loadMore && loadingMoreRef.current) return;
 
+    const requestId = loadMore
+      ? notificationRequestRef.current
+      : notificationRequestRef.current + 1;
+    notificationRequestRef.current = requestId;
+    if (loadMore) {
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    } else {
+      loadingMoreRef.current = false;
+      notificationOffsetRef.current = 0;
+      setNotifications([]);
+      setHasMoreNotifications(false);
+      setNotificationsLoading(true);
+      setNotificationsError(false);
+    }
     try {
-      const { data, error } = await supabase
+      const { start, end } = getMonthBounds(
+        notificationMonth.year,
+        notificationMonth.month,
+      );
+      const offset = loadMore ? notificationOffsetRef.current : 0;
+      const pageQuery = supabase
         .from("notifications")
         .select("*")
-        .order("created_at", { ascending: false });
+        .eq("user_id", userId)
+        .gte("created_at", start)
+        .lt("created_at", end)
+        .order("created_at", { ascending: false })
+        .range(offset, offset + PAGE_SIZE - 1);
+      const { data: pageData, error: pageError } = await pageQuery;
+      if (pageError) throw pageError;
+      if (requestId !== notificationRequestRef.current) return;
 
-      if (error) throw error;
-
-      const items: NotificationItem[] = data ?? [];
-      setNotifications(items);
-      setUnreadCount(items.filter((n) => !n.is_read).length);
-      hasNotifsRef.current = items.length > 0;
-      checkUnreadDeadlineReminders(items);
-    } catch {
-      if (!hasNotifsRef.current) {
-        setNotifications([]);
-        setUnreadCount(0);
+      const items: NotificationItem[] = pageData ?? [];
+      notificationOffsetRef.current = loadMore
+        ? offset + items.length
+        : items.length;
+      setNotifications((current) => {
+        const merged = loadMore ? [...current, ...items] : items;
+        const unique = new Map<number, NotificationItem>();
+        for (const notification of merged) unique.set(notification.id, notification);
+        return Array.from(unique.values()).sort(
+          (left, right) =>
+            new Date(right.created_at).getTime() -
+            new Date(left.created_at).getTime(),
+        );
+      });
+      setHasMoreNotifications(items.length === PAGE_SIZE);
+      if (!loadMore) {
+        const { count, error: countError } = await supabase
+          .from("notifications")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId)
+          .eq("is_read", false);
+        if (countError) throw countError;
+        setUnreadCount(count ?? 0);
+        const { data: reminderData, error: reminderError } = await supabase
+          .from("notifications")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("is_read", false)
+          .in("type", ["deadline_approaching", "job_overdue"]);
+        if (reminderError) throw reminderError;
+        checkUnreadDeadlineReminders(reminderData ?? []);
+      }
+    } catch (error) {
+      if (requestId !== notificationRequestRef.current) return;
+      if (!loadMore) setNotifications([]);
+      setNotificationsError(true);
+      showToast(
+        "Couldn't load notifications",
+        error instanceof Error ? error.message : "Please try again.",
+      );
+    } finally {
+      if (requestId === notificationRequestRef.current) {
+        setNotificationsLoading(false);
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
       }
     }
-  }, [session?.user?.id, checkUnreadDeadlineReminders]);
+  }, [
+    userId,
+    checkUnreadDeadlineReminders,
+    notificationMonth,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
-      if (!isSessionReady || !session?.user?.id) {
+      if (!isSessionReady || !userId) {
         return;
       }
 
       fetchJobs();
       fetchNotifications();
-    }, [fetchJobs, fetchNotifications, isSessionReady, session?.user?.id]),
+    }, [fetchJobs, fetchNotifications, isSessionReady, userId]),
   );
 
   useEffect(() => {
-    if (isSessionReady && session?.user?.id) {
+    if (isSessionReady && userId) {
       fetchJobs();
-      fetchNotifications();
     }
-  }, [isSessionReady, session?.user?.id, fetchJobs, fetchNotifications]);
+  }, [isSessionReady, userId, fetchJobs]);
 
   const openDrawer = () => {
     setDrawerOpen(true);
@@ -357,9 +517,17 @@ export default function CommandCenter() {
     }).start(() => setDrawerOpen(false));
   };
 
-  const openJobs = recentActivity.filter(
-    (record) => record.record_type === "job" && record.job.status !== "done",
-  ).length;
+const { pending: pendingCount, inProgress: inProgressCount } = useOpenJobs();
+const openJobs = pendingCount + inProgressCount;
+const openJobsSubtitle =
+  openJobs === 0
+    ? "All caught up"
+    : [
+        pendingCount > 0 ? `${pendingCount} pending` : null,
+        inProgressCount > 0 ? `${inProgressCount} in progress` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
   const hour = new Date().getHours();
   const greeting =
     hour < 12
@@ -367,12 +535,55 @@ export default function CommandCenter() {
       : hour < 17
         ? "Good afternoon"
         : "Good evening";
-
   const today = new Date().toLocaleDateString("en-NG", {
     weekday: "long",
     day: "numeric",
     month: "long",
   });
+  const notificationRows = useMemo<NotificationListRow[]>(() => {
+    const rows: NotificationListRow[] = [];
+    let previousDay = "";
+    const todayKey = getLagosTodayKey();
+
+    for (const notification of notifications) {
+      const day = getLagosDayKey(notification.created_at);
+      if (day !== previousDay) {
+        rows.push({
+          kind: "header",
+          key: `day:${day}`,
+          title: formatNotificationDay(day, todayKey),
+        });
+        previousDay = day;
+      }
+      rows.push({
+        kind: "notification",
+        key: `notification:${notification.id}`,
+        notification,
+      });
+    }
+    return rows;
+  }, [notifications]);
+  const notificationMonthTitle = new Intl.DateTimeFormat("en", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(
+    new Date(
+      Date.UTC(notificationMonth.year, notificationMonth.month - 1, 1),
+    ),
+  );
+  const currentLagosMonth = getLagosCurrentMonth();
+  const isCurrentNotificationMonth =
+    notificationMonth.year === currentLagosMonth.year &&
+    notificationMonth.month === currentLagosMonth.month;
+  const changeNotificationMonth = (delta: number) => {
+    setNotificationMonth((current) => {
+      const next = new Date(
+        Date.UTC(current.year, current.month - 1 + delta, 1),
+      );
+      return { year: next.getUTCFullYear(), month: next.getUTCMonth() + 1 };
+    });
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -426,7 +637,7 @@ export default function CommandCenter() {
             valueColor={colors.primaryText}
             subtitle={
               isWorker
-                ? `${mySalesTodayGroups.length} sales · ${myJobsToday.length} jobs done`
+                ? `${plural(mySalesTodayGroups.length, "sale")} · ${plural(myJobsToday.length, "job")} done`
                 : "Tap for today's summary & Close Day"
             }
             subtitleColor={colors.primaryText}
@@ -442,7 +653,7 @@ export default function CommandCenter() {
             value={openJobs}
             colors={colors}
             backgroundColor={colors.surface}
-            subtitle={`${recentActivity.length} recent records`}
+            subtitle={openJobsSubtitle}
             onPress={() => router.push("/(tabs)/jobs" as any)}
           />
         </View>
@@ -540,12 +751,15 @@ export default function CommandCenter() {
                 activity.record_type === "job" ? activity.job : activity.group.lines[0];
               const group: SaleGroup<Job> | null =
                 activity.record_type === "sale" ? activity.group : null;
-              const creatorName =
-                group && group.lines.length > 1
-                  ? group.created_by_name
-                  : isOwner
-                    ? job.created_by_name
-                    : null;
+              const creatorName = group
+                ? group.created_by_name
+                : isOwner
+                  ? job.created_by_name
+                  : null;
+              const time = new Date(activity.created_at).toLocaleTimeString(
+                "en-US",
+                { hour: "numeric", minute: "2-digit" },
+              );
               const statusStyles = getStatusStyle(
                 colors,
                 activity.record_type === "sale" ? "done" : job.status,
@@ -568,15 +782,18 @@ export default function CommandCenter() {
                   activeOpacity={0.7}
                 >
                   <View style={styles.jobLeft}>
-                    <View>
-                      <Text style={[styles.jobCustomer, { color: colors.text }]}>
-                        {group && group.lines.length > 1
+                    <View style={styles.jobCopy}>
+                      <Text
+                        style={[styles.jobCustomer, { color: colors.text }]}
+                        numberOfLines={1}
+                      >
+                        {group
                           ? describeSaleGroup(group)
                           : job.customer_name || "Walk-in Customer"}
                       </Text>
                       <Text style={[styles.jobService, { color: colors.textMuted }]}>
-                        {group && group.lines.length > 1
-                          ? `${formatCurrency(group.total, currency)} · ${group.unitCount} units`
+                        {group
+                          ? `${formatCurrency(group.total, currency)} · ${plural(group.unitCount, "unit")}`
                           : job.service}
                       </Text>
                       {creatorName ? (
@@ -611,12 +828,7 @@ export default function CommandCenter() {
                       </Text>
                     </View>
                     <Text style={[styles.jobTime, { color: colors.textSecondary }]}>
-                      {activity.record_type === "sale" && group && group.lines.length > 1
-                        ? new Date(group.earliestTimestamp).toLocaleTimeString([], {
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
-                        : job.time || "—"}
+                      {time}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -769,44 +981,125 @@ export default function CommandCenter() {
               </TouchableOpacity>
             </View>
 
-            {notifications.length === 0 ? (
+            <View style={styles.notificationMonthPicker}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Previous month"
+                onPress={() => changeNotificationMonth(-1)}
+                style={styles.notificationMonthArrow}
+              >
+                <ChevronLeft size={22} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={[styles.notificationMonthTitle, { color: colors.text }]}>
+                {notificationMonthTitle}
+              </Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Next month"
+                accessibilityState={{ disabled: isCurrentNotificationMonth }}
+                disabled={isCurrentNotificationMonth}
+                onPress={() => changeNotificationMonth(1)}
+                style={[
+                  styles.notificationMonthArrow,
+                  isCurrentNotificationMonth && styles.disabledNotificationMonthArrow,
+                ]}
+              >
+                <ChevronRight
+                  size={22}
+                  color={
+                    isCurrentNotificationMonth ? colors.textMuted : colors.text
+                  }
+                />
+              </TouchableOpacity>
+            </View>
+
+            {notificationsLoading && notifications.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={[styles.emptyText, { color: colors.textMuted }]}>
+                  Loading notifications...
+                </Text>
+              </View>
+            ) : notifications.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={[styles.emptyText, { color: colors.text }]}>
-                  No notifications yet
+                  {notificationsError
+                    ? "Couldn't load notifications"
+                    : `No notifications in ${notificationMonthTitle}`}
                 </Text>
                 <Text style={[styles.emptySubText, { color: colors.textMuted }]}>
-                  Low stock alerts will show up here
+                  {notificationsError
+                    ? "Please try again later."
+                    : "Low stock alerts will show up here"}
                 </Text>
               </View>
             ) : (
               <FlatList
-                data={notifications}
-                keyExtractor={(item) => String(item.id)}
+                data={notificationRows}
+                keyExtractor={(item) => item.key}
                 showsVerticalScrollIndicator={false}
-                renderItem={({ item }) => (
-                  <View
-                    style={[
-                      styles.notifItem,
-                      { borderBottomColor: colors.border },
-                      !item.is_read && { backgroundColor: colors.surfaceHighlight },
-                    ]}
-                  >
-                    <Text style={[styles.notifItemTitle, { color: colors.text }]}>
-                      {item.title}
-                    </Text>
-                    <Text style={[styles.notifItemMessage, { color: colors.textSecondary }]}>
-                      {item.message}
-                    </Text>
-                    <Text style={[styles.notifItemTime, { color: colors.textMuted }]}>
-                      {new Date(item.created_at).toLocaleString("en-NG", {
-                        day: "numeric",
-                        month: "short",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </Text>
-                  </View>
-                )}
+                renderItem={({ item }) =>
+                  item.kind === "header" ? (
+                    <View
+                      style={[
+                        styles.notificationDayHeader,
+                        { borderBottomColor: colors.border },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.notificationDayTitle,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {item.title}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View
+                      style={[
+                        styles.notifItem,
+                        { borderBottomColor: colors.border },
+                        !item.notification.is_read && {
+                          backgroundColor: colors.surfaceHighlight,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.notifItemTitle, { color: colors.text }]}>
+                        {item.notification.title}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.notifItemMessage,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        {item.notification.message}
+                      </Text>
+                      <Text style={[styles.notifItemTime, { color: colors.textMuted }]}>
+                        {getLagosTime(item.notification.created_at)}
+                      </Text>
+                    </View>
+                  )
+                }
+                ListFooterComponent={
+                  loadingMore ? (
+                    <View style={styles.loadOlderButton}>
+                      <Text style={[styles.loadOlderText, { color: colors.textMuted }]}>
+                        Loading...
+                      </Text>
+                    </View>
+                  ) : hasMoreNotifications ? (
+                    <TouchableOpacity
+                      style={styles.loadOlderButton}
+                      onPress={() => void fetchNotifications(true)}
+                      accessibilityRole="button"
+                    >
+                      <Text style={[styles.loadOlderText, { color: colors.primary }]}>
+                        Load more
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null
+                }
               />
             )}
           </View>
@@ -898,16 +1191,16 @@ const styles = StyleSheet.create({
   },
   jobItem: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     padding: 16,
     borderBottomWidth: 1,
   },
-  jobLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  jobLeft: { flex: 1, minWidth: 0 },
+  jobCopy: { flex: 1, minWidth: 0 },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   jobCustomer: { fontSize: 14, fontWeight: "600" },
   jobService: { fontSize: 12, marginTop: 2 },
-  jobRight: { alignItems: "flex-end" },
+  jobRight: { flexShrink: 0, alignItems: "flex-end", marginLeft: 12 },
   statusBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -1008,12 +1301,33 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === "ios" ? 36 : 24,
     borderWidth: 1,
   },
+  notificationDayHeader: {
+    paddingTop: 22,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  notificationDayTitle: { fontSize: 16, fontWeight: "800" },
   notifModalHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 16,
   },
+  notificationMonthPicker: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: -6,
+    marginBottom: 8,
+  },
+  notificationMonthArrow: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  disabledNotificationMonthArrow: { opacity: 0.45 },
+  notificationMonthTitle: { fontSize: 16, fontWeight: "700" },
   notifModalTitle: { fontSize: 18, fontWeight: "700" },
   notifItem: {
     paddingVertical: 14,
@@ -1022,4 +1336,10 @@ const styles = StyleSheet.create({
   notifItemTitle: { fontSize: 14, fontWeight: "700", marginBottom: 4 },
   notifItemMessage: { fontSize: 13, marginBottom: 6 },
   notifItemTime: { fontSize: 11 },
+  loadOlderButton: {
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadOlderText: { fontSize: 14, fontWeight: "700" },
 });

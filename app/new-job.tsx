@@ -2,17 +2,17 @@ import { router } from "expo-router";
 import { Calendar, Check, ChevronDown, Clock, Search, X } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import { COUNTRIES, Country, DEFAULT_COUNTRY } from "../constants/countries";
@@ -356,7 +356,7 @@ export default function NewJobScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.fieldWrapper}>
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Customer Name *</Text>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Customer Name (Optional)</Text>
           <TouchableOpacity
             style={[styles.customerPickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
             onPress={() => setCustomerPickerVisible(true)}
@@ -427,7 +427,7 @@ export default function NewJobScreen() {
         </View>
 
         <View style={styles.fieldWrapper}>
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Service *</Text>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>Service</Text>
           <TouchableOpacity
             style={[
               styles.cataloguePickerButton,
@@ -459,7 +459,9 @@ export default function NewJobScreen() {
         </View>
 
         <View style={styles.fieldWrapper}>
-          <Text style={[styles.label, { color: colors.textSecondary }]}>Price ({CURRENCIES[currency].symbol}) *</Text>
+          <Text style={[styles.label, { color: colors.textSecondary }]}>
+            Price ({CURRENCIES[currency].symbol})
+          </Text>
           <TextInput
             style={[
               styles.input,

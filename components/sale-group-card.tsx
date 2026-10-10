@@ -1,8 +1,11 @@
+import { describeSaleGroup } from "@/hooks/sale-groups";
 import { useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { formatCurrency, CurrencyCode } from "../constants/currency";
+import { CurrencyCode, formatCurrency } from "../constants/currency";
+import { plural } from "../constants/plural";
 import { ThemeColors } from "../constants/theme";
-import { SaleGroup, SaleGroupLine, describeSaleGroup } from "../hooks/sale-groups";
+import { SaleGroup, SaleGroupLine } from "../hooks/sale-groups";
+
 
 export default function SaleGroupCard<T extends SaleGroupLine>({
   group,
@@ -22,10 +25,11 @@ export default function SaleGroupCard<T extends SaleGroupLine>({
   amountLabel?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const time = new Date(group.earliestTimestamp).toLocaleString([], {
-    dateStyle: "short",
-    timeStyle: "short",
+  const time = new Date(group.earliestTimestamp).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
   });
+  const title = describeSaleGroup(group);
 
   return (
     <View
@@ -40,16 +44,19 @@ export default function SaleGroupCard<T extends SaleGroupLine>({
     >
       <TouchableOpacity
         style={styles.summary}
-        onPress={() => setExpanded((value) => !value)}
-        accessibilityRole="button"
+        disabled={group.lines.length === 1}
+        onPress={() => {
+          if (group.lines.length > 1) setExpanded((value) => !value);
+        }}
+        accessibilityRole={group.lines.length > 1 ? "button" : undefined}
         accessibilityState={{ expanded }}
       >
         <View style={styles.summaryCopy}>
-          <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
-            {describeSaleGroup(group)}
-          </Text>
+        <Text style={[styles.title, { color: colors.text }]} numberOfLines={1} ellipsizeMode="tail">
+          {title}
+        </Text>
           <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-            {group.unitCount} units · {time}
+            {formatCurrency(totalOverride ?? group.total, currency)} · {plural(group.unitCount, "unit")}
           </Text>
           {group.created_by_name ? (
             <Text style={[styles.subtitle, { color: colors.textMuted }]}>
@@ -57,14 +64,46 @@ export default function SaleGroupCard<T extends SaleGroupLine>({
             </Text>
           ) : null}
         </View>
-        <View style={styles.summaryAmount}>
-          <Text style={[styles.total, { color: colors.text }]}>
-            {amountLabel ? `${amountLabel} ` : ""}
-            {formatCurrency(totalOverride ?? group.total, currency)}
-          </Text>
-          <Text style={[styles.expandLabel, { color: colors.primary }]}>
-            {expanded ? "Hide lines" : "View lines"}
-          </Text>
+        <View style={styles.summaryAside}>
+          <View
+            style={[
+              styles.statusBadge,
+              {
+                backgroundColor: group.voided
+                  ? `${colors.danger}18`
+                  : `${colors.statusDone}18`,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                { color: group.voided ? colors.danger : colors.statusDone },
+              ]}
+            >
+              {amountLabel ?? (group.voided ? "Voided" : "Sold")}
+            </Text>
+          </View>
+          <Text style={[styles.time, { color: colors.textSecondary }]}>{time}</Text>
+          {group.lines.length === 1 && isOwner && !group.voided && onVoid ? (
+            <TouchableOpacity
+              style={styles.voidButton}
+              onPress={() => onVoid(group.lines[0])}
+              accessibilityRole="button"
+              accessibilityLabel={`Void ${group.lines[0].service}`}
+            >
+              <Text style={[styles.voidText, { color: colors.danger }]}>Void</Text>
+            </TouchableOpacity>
+          ) : group.lines.length > 1 ? (
+            <Text style={[styles.expandLabel, { color: colors.primary }]}>
+              {expanded ? "Hide lines" : "View lines"}
+            </Text>
+          ) : null}
+          {group.lines.length === 1 && group.lines[0].voided_at && isOwner ? (
+            <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+              {group.lines[0].void_reason ?? "Voided"}
+            </Text>
+          ) : null}
         </View>
       </TouchableOpacity>
 
@@ -148,16 +187,16 @@ const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: 12, marginBottom: 10, overflow: "hidden" },
   summary: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    gap: 12,
     padding: 16,
   },
-  summaryCopy: { flex: 1, gap: 4 },
+  summaryCopy: { flex: 1, minWidth: 0, gap: 4 },
   title: { fontSize: 15, fontWeight: "700" },
   subtitle: { fontSize: 12, lineHeight: 17 },
-  summaryAmount: { alignItems: "flex-end", gap: 5 },
-  total: { fontSize: 15, fontWeight: "800" },
+  summaryAside: { flexShrink: 0, alignItems: "flex-end", marginLeft: 12 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  statusText: { fontSize: 11, fontWeight: "700" },
+  time: { fontSize: 11, marginTop: 4 },
   expandLabel: { fontSize: 12, fontWeight: "700" },
   lines: { borderTopWidth: 1, paddingHorizontal: 14 },
   line: {

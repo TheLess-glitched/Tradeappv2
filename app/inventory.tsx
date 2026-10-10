@@ -1,16 +1,16 @@
 import { useFocusEffect, useNavigation } from "expo-router";
 import { DrawerNavigationProp } from "expo-router/drawer";
 import { AlertTriangle, ArrowLeft } from "lucide-react-native";
-import React, { useCallback, useState } from "react";
+import { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import { supabase } from "../constants/supabase";
@@ -319,7 +319,7 @@ export default function InventoryScreen() {
           >
             <Text style={[styles.modalTitle, { color: colors.text }]}>New Item</Text>
 
-            <Text style={[styles.label, { color: colors.textSecondary }]}>Item Name *</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Item Name</Text>
             <TextInput
               style={[
                 styles.input,
@@ -335,7 +335,7 @@ export default function InventoryScreen() {
               onChangeText={setName}
             />
 
-            <Text style={[styles.label, { color: colors.textSecondary }]}>Quantity *</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Quantity</Text>
             <TextInput
               style={[
                 styles.input,

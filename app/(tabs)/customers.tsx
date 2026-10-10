@@ -3,15 +3,15 @@ import { useFocusEffect } from "expo-router";
 import { MessageCircle, Phone } from "lucide-react-native";
 import { useCallback, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Linking,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Linking,
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { showFeedback } from "../../components/app-feedback";
 import { normalizePhone } from "../../constants/phone";
@@ -397,7 +397,7 @@ export default function CustomersScreen() {
           >
             <Text style={[styles.modalTitle, { color: colors.text }]}>New Customer</Text>
 
-            <Text style={[styles.label, { color: colors.textSecondary }]}>Name *</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Name</Text>
             <TextInput
               style={[
                 styles.input,
@@ -413,7 +413,7 @@ export default function CustomersScreen() {
               onChangeText={setName}
             />
 
-            <Text style={[styles.label, { color: colors.textSecondary }]}>Phone *</Text>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>Phone</Text>
             <TextInput
               style={[
                 styles.input,

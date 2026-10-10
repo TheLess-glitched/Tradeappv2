@@ -1,24 +1,24 @@
 import { router, useFocusEffect } from "expo-router";
 import {
-    MapPin,
-    Package,
-    Pencil,
-    Plus,
-    Search,
-    Trash2,
-    X,
+  MapPin,
+  Package,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
 } from "lucide-react-native";
 import { useCallback, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { showFeedback } from "../../components/app-feedback";
 import SellModal from "../../components/sell-modal";
@@ -509,7 +509,7 @@ export default function CatalogueScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>Name *</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>Name</Text>
               <TextInput
                 style={[
                   styles.input,
@@ -571,7 +571,7 @@ export default function CatalogueScreen() {
 
               <View style={styles.row}>
                 <View style={styles.rowItem}>
-                  <Text style={[styles.label, { color: colors.textSecondary }]}>Quantity *</Text>
+                  <Text style={[styles.label, { color: colors.textSecondary }]}>Quantity</Text>
                   <TextInput
                     style={[
                       styles.input,

@@ -12,11 +12,12 @@ import {
 import CompletedJobRow from "../components/completed-job-row";
 import SaleGroupCard from "../components/sale-group-card";
 import { formatCurrency } from "../constants/currency";
+import { plural } from "../constants/plural";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 import { groupSaleRows } from "../hooks/sale-groups";
-import type { TodayRecord } from "../hooks/use-todays-jobs";
 import { useRevenueHistory } from "../hooks/use-revenue-history";
+import type { TodayRecord } from "../hooks/use-todays-jobs";
 
 function getDateFromDay(day: string): Date {
   const [year, month, date] = day.split("-").map(Number);
@@ -28,6 +29,39 @@ function getNextMonth(year: number, month: number, delta: number) {
   return { year: date.getFullYear(), month: date.getMonth() + 1 };
 }
 
+type WeekRange = {
+  key: string;
+  startDay: string;
+  endDay: string;
+  label: string;
+};
+
+function getMonthWeeks(year: number, month: number): WeekRange[] {
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const firstWeekday = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const firstWeekMonday = 1 - ((firstWeekday + 6) % 7);
+  const monthName = new Intl.DateTimeFormat("en", {
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+  const ranges: WeekRange[] = [];
+
+  for (let weekStart = firstWeekMonday; weekStart <= lastDay; weekStart += 7) {
+    const start = Math.max(1, weekStart);
+    const end = Math.min(lastDay, weekStart + 6);
+    const startDay = `${year}-${String(month).padStart(2, "0")}-${String(start).padStart(2, "0")}`;
+    const endDay = `${year}-${String(month).padStart(2, "0")}-${String(end).padStart(2, "0")}`;
+    ranges.push({
+      key: `${startDay}:${endDay}`,
+      startDay,
+      endDay,
+      label: `${monthName} ${start}–${end}`,
+    });
+  }
+
+  return ranges;
+}
+
 export default function HistoryScreen() {
   const { colors, currency } = useTheme();
   const { role } = useAuth();
@@ -36,9 +70,26 @@ export default function HistoryScreen() {
     year: now.getFullYear(),
     month: now.getMonth() + 1,
   });
+  const [selectedWeekKey, setSelectedWeekKey] = useState<string | null>(null);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const { rows, loading, error, dayRecords, loadingDays, fetchDayRecords } =
     useRevenueHistory(selectedMonth.year, selectedMonth.month);
+  const weeks = useMemo(
+    () => getMonthWeeks(selectedMonth.year, selectedMonth.month),
+    [selectedMonth],
+  );
+  const selectedWeek =
+    weeks.find((week) => week.key === selectedWeekKey) ?? null;
+  const filteredRows = useMemo(
+    () =>
+      selectedWeek
+        ? rows.filter(
+            (row) =>
+              row.day >= selectedWeek.startDay && row.day <= selectedWeek.endDay,
+          )
+        : rows,
+    [rows, selectedWeek],
+  );
   const isCurrentMonth =
     selectedMonth.year === now.getFullYear() &&
     selectedMonth.month === now.getMonth() + 1;
@@ -54,7 +105,7 @@ export default function HistoryScreen() {
       ),
     [selectedMonth],
   );
-  const summary = rows.reduce(
+  const summary = filteredRows.reduce(
     (totals, row) => ({
       revenue: totals.revenue + row.revenue,
       profit: totals.profit + row.profit,
@@ -69,6 +120,12 @@ export default function HistoryScreen() {
     setSelectedMonth((current) =>
       getNextMonth(current.year, current.month, delta),
     );
+    setSelectedWeekKey(null);
+    setExpandedDay(null);
+  };
+
+  const selectWeek = (weekKey: string | null) => {
+    setSelectedWeekKey(weekKey);
     setExpandedDay(null);
   };
 
@@ -123,6 +180,49 @@ export default function HistoryScreen() {
         </TouchableOpacity>
       </View>
 
+      <ScrollView
+        horizontal
+        style={styles.weekRow}
+        contentContainerStyle={styles.weekChips}
+        showsHorizontalScrollIndicator={false}
+      >
+        {[
+          { key: null, label: "Whole month" },
+          ...weeks.map((week) => ({ key: week.key, label: week.label })),
+        ].map((week) => {
+          const selected = week.key === selectedWeekKey;
+          return (
+            <TouchableOpacity
+              key={week.key ?? "whole-month"}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => selectWeek(week.key)}
+              style={[
+                styles.weekChip,
+                {
+                  backgroundColor: selected ? colors.primary : colors.surface,
+                  borderColor: selected ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.weekChipText,
+                  { color: selected ? colors.primaryText : colors.textSecondary },
+                ]}
+              >
+                {week.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+      {selectedWeek ? (
+        <Text style={[styles.weekCaption, { color: colors.textMuted }]}>
+          Showing {selectedWeek.label}
+        </Text>
+      ) : null}
+
       {loading ? (
         <View style={styles.loading}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -157,17 +257,23 @@ export default function HistoryScreen() {
                 </Text>
                 {label === "Profit" && summary.unknownCosts > 0 ? (
                   <Text style={[styles.costNote, { color: colors.textMuted }]}>
-                    {summary.unknownCosts} items have no cost and are not counted
+                    {summary.unknownCosts === 1
+                      ? "1 item has no cost and is not counted"
+                      : `${summary.unknownCosts} items have no cost and are not counted`}
                   </Text>
                 ) : null}
               </View>
             ))}
           </View>
 
-          {rows.length === 0 ? (
+          {filteredRows.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                {error ? "Couldn't load history" : "No sales or jobs this month"}
+                {error
+                  ? "Couldn't load history"
+                  : selectedWeek
+                    ? "No sales or jobs in this period"
+                    : "No sales or jobs this month"}
               </Text>
               {error ? (
                 <Text style={[styles.emptyMessage, { color: colors.textMuted }]}>
@@ -177,7 +283,7 @@ export default function HistoryScreen() {
             </View>
           ) : (
             <View style={styles.days}>
-              {rows.map((row) => {
+              {filteredRows.map((row) => {
                 const date = getDateFromDay(row.day);
                 const dayTitle = new Intl.DateTimeFormat("en", {
                   weekday: "long",
@@ -229,7 +335,7 @@ export default function HistoryScreen() {
                           {dayTitle}
                         </Text>
                         <Text style={[styles.dayCounts, { color: colors.textMuted }]}>
-                          {row.sales_count} sales · {row.jobs_count} jobs
+                          {plural(row.sales_count, "sale")} · {plural(row.jobs_count, "job")}
                         </Text>
                       </View>
                       <View style={styles.dayAside}>
@@ -360,7 +466,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingBottom: 8,
   },
   monthArrow: {
     width: 40,
@@ -372,6 +478,16 @@ const styles = StyleSheet.create({
   },
   disabledArrow: { opacity: 0.45 },
   monthTitle: { fontSize: 17, fontWeight: "700" },
+  weekRow: { flexGrow: 0, flexShrink: 0 },
+  weekChips: { paddingHorizontal: 20, gap: 8, paddingBottom: 4, alignItems: "center" },
+  weekChip: {
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
+  weekChipText: { fontSize: 12, fontWeight: "600" },
+  weekCaption: { fontSize: 12, paddingHorizontal: 20, paddingTop: 5, paddingBottom: 12 },
   scroll: { paddingHorizontal: 20, paddingBottom: 36 },
   loading: {
     flex: 1,

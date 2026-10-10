@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { CURRENCIES } from "../constants/currency";
+import { CURRENCIES, formatCurrency } from "../constants/currency";
 import { supabase } from "../constants/supabase";
 import { useTheme } from "../context/theme-context";
 import { showFeedback } from "./app-feedback";
@@ -38,7 +38,16 @@ type SaleDraft = {
   itemId: string;
   quantity: string;
   price: string;
+  total: string;
 };
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function parseAmount(value: string): number {
+  return Number(value.replace(/,/g, "").trim());
+}
 
 export default function SellModal({
   visible,
@@ -71,28 +80,66 @@ export default function SellModal({
         ? item.selling_price.toString()
         : "";
 
-  const updateSaleDraft = (
-    updates: Partial<Pick<SaleDraft, "quantity" | "price">>,
-  ) => {
-    if (!item) return;
-    setSaleDraft((current) => ({
-      itemId: item.id,
-      quantity:
-        current?.itemId === item.id
-          ? current.quantity
-          : mode === "cart" && initialQuantity != null
-            ? initialQuantity.toString()
-            : "1",
+  const initialTotal =
+    Number.isInteger(Number(quantity)) &&
+    Number(quantity) > 0 &&
+    Number.isFinite(parseAmount(price))
+      ? String(roundMoney(Number(quantity) * parseAmount(price)))
+      : "";
+  const total =
+    saleDraft && saleDraft.itemId === item?.id
+      ? saleDraft.total
+      : initialTotal;
+  const parsedQuantity = Number(quantity);
+  const parsedPrice = parseAmount(price);
+
+  const currentDraft = (): SaleDraft => ({
+    itemId: item?.id ?? "",
+    quantity,
+    price,
+    total,
+  });
+
+  const updateQuantity = (value: string) => {
+    const draft = currentDraft();
+    const qty = Number(value);
+    const unitPrice = parseAmount(draft.price);
+    setSaleDraft({
+      ...draft,
+      quantity: value,
+      total:
+        Number.isInteger(qty) && qty > 0 && Number.isFinite(unitPrice)
+          ? String(roundMoney(unitPrice * qty))
+          : "",
+    });
+  };
+
+  const updatePrice = (value: string) => {
+    const draft = currentDraft();
+    const unitPrice = parseAmount(value);
+    const qty = Number(draft.quantity);
+    setSaleDraft({
+      ...draft,
+      price: value,
+      total:
+        Number.isInteger(qty) && qty > 0 && Number.isFinite(unitPrice)
+          ? String(roundMoney(unitPrice * qty))
+          : "",
+    });
+  };
+
+  const updateTotal = (value: string) => {
+    const draft = currentDraft();
+    const lineTotal = parseAmount(value);
+    const qty = Number(draft.quantity);
+    setSaleDraft({
+      ...draft,
+      total: value,
       price:
-        current?.itemId === item.id
-          ? current.price
-          : mode === "cart" && initialPrice != null
-            ? initialPrice.toString()
-            : item.selling_price != null
-            ? item.selling_price.toString()
-            : "",
-      ...updates,
-    }));
+        Number.isFinite(lineTotal) && Number.isInteger(qty) && qty > 0
+          ? String(lineTotal / qty)
+          : "",
+    });
   };
 
   const handleClose = () => {
@@ -104,8 +151,8 @@ export default function SellModal({
   const handleCompleteSale = async () => {
     if (!item) return;
 
-    const parsedQty = parseInt(quantity.replace(/[^0-9]/g, ""), 10);
-    if (!Number.isFinite(parsedQty) || parsedQty < 0 || (mode === "sale" && parsedQty === 0)) {
+    const parsedQty = Number(quantity);
+    if (!Number.isInteger(parsedQty) || parsedQty < 1) {
       showFeedback("Invalid quantity", "Please enter a valid quantity greater than 0.");
       return;
     }
@@ -114,9 +161,15 @@ export default function SellModal({
       return;
     }
 
-    const parsedPrice = parseFloat(price.replace(/[^0-9.]/g, "")) || 0;
-    if (parsedQty > 0 && (!parsedPrice || parsedPrice <= 0)) {
-      showFeedback("Invalid price", "Please enter a valid price greater than 0.");
+    const parsedPrice = parseAmount(price);
+    const parsedTotal = parseAmount(total);
+    if (
+      !Number.isFinite(parsedTotal) ||
+      parsedTotal <= 0 ||
+      !Number.isFinite(parsedPrice) ||
+      parsedPrice <= 0
+    ) {
+      showFeedback("Invalid total", "Please enter a total greater than 0.");
       return;
     }
 
@@ -205,28 +258,65 @@ export default function SellModal({
             placeholder="1"
             placeholderTextColor={colors.placeholder}
             value={quantity}
-            onChangeText={(value) => updateSaleDraft({ quantity: value })}
+            onChangeText={updateQuantity}
             keyboardType="numeric"
           />
 
-          <Text style={[styles.label, { color: colors.textSecondary }]}>
-            Price ({CURRENCIES[currency].symbol})
-          </Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: colors.inputBackground,
-                borderColor: colors.inputBorder,
-                color: colors.inputText,
-              },
-            ]}
-            placeholder="0"
-            placeholderTextColor={colors.placeholder}
-            value={price}
-            onChangeText={(value) => updateSaleDraft({ price: value })}
-            keyboardType="numeric"
-          />
+          <View style={styles.fieldsRow}>
+            <View style={styles.fieldColumn}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                Price ({CURRENCIES[currency].symbol})
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                    color: colors.inputText,
+                  },
+                ]}
+                placeholder="0"
+                placeholderTextColor={colors.placeholder}
+                value={price}
+                onChangeText={updatePrice}
+                keyboardType="decimal-pad"
+              />
+            </View>
+            <View style={styles.fieldColumn}>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                Total ({CURRENCIES[currency].symbol})
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: colors.inputBackground,
+                    borderColor: colors.inputBorder,
+                    color: colors.inputText,
+                  },
+                ]}
+                placeholder="0"
+                placeholderTextColor={colors.placeholder}
+                value={total}
+                onChangeText={updateTotal}
+                keyboardType="decimal-pad"
+              />
+            </View>
+          </View>
+          {item?.selling_price != null &&
+          Number.isInteger(parsedQuantity) &&
+          parsedQuantity > 0 &&
+          Number.isFinite(parsedPrice) &&
+          parsedPrice < item.selling_price ? (
+            <Text style={[styles.discountHint, { color: colors.textMuted }]}>
+              Discount:{" "}
+              {formatCurrency(
+                roundMoney((item.selling_price - parsedPrice) * parsedQuantity),
+                currency,
+              )}
+            </Text>
+          ) : null}
 
           <TouchableOpacity
             style={[
@@ -263,7 +353,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
-    maxHeight: "60%",
+    maxHeight: "75%",
     borderWidth: 1,
   },
   modalHeader: {
@@ -279,14 +369,17 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   label: { fontSize: 13, fontWeight: "600", marginBottom: 6 },
+  fieldsRow: { flexDirection: "row", gap: 10 },
+  fieldColumn: { flex: 1 },
   input: {
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 14,
-    marginBottom: 16,
+    marginBottom: 8,
     borderWidth: 1,
   },
+  discountHint: { fontSize: 12, marginBottom: 8 },
   saveButton: {
     borderRadius: 12,
     paddingVertical: 16,

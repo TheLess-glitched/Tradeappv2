@@ -17,10 +17,11 @@ import {
 } from "react-native";
 import { showDialog, showToast } from "../components/app-feedback";
 import SellModal, { SellModalItem } from "../components/sell-modal";
-import { formatCurrency } from "../constants/currency";
+import { CURRENCIES, formatCurrency } from "../constants/currency";
+import { plural } from "../constants/plural";
 import { supabase } from "../constants/supabase";
-import { CartLine, useCart } from "../context/cart-context";
 import { useAuth } from "../context/auth-context";
+import { CartLine, useCart } from "../context/cart-context";
 import { useTheme } from "../context/theme-context";
 
 type TrackedCatalogueItem = {
@@ -44,6 +45,14 @@ type QuickSellRowProps = {
   onEdit: (item: TrackedCatalogueItem) => void;
   currency: ReturnType<typeof useTheme>["currency"];
 };
+
+function roundMoney(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function parseAmount(value: string): number {
+  return Number(value.replace(/,/g, "").trim());
+}
 
 const QuickSellRow = memo(function QuickSellRow({
   item,
@@ -201,6 +210,7 @@ export default function QuickSellScreen() {
   const [quantityEditId, setQuantityEditId] = useState<string | null>(null);
   const [quantityDraft, setQuantityDraft] = useState("");
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
+  const [totalDrafts, setTotalDrafts] = useState<Record<string, string>>({});
   const [stockErrorItemId, setStockErrorItemId] = useState<string | null>(null);
 
   const fetchTrackedItems = useCallback(async () => {
@@ -280,7 +290,19 @@ export default function QuickSellScreen() {
   );
 
   const handleQuantityChange = useCallback(
-    (itemId: string, quantity: number) => setQty(itemId, quantity),
+    (itemId: string, quantity: number) => {
+      setQty(itemId, quantity);
+      setPriceDrafts((current) => {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      });
+      setTotalDrafts((current) => {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      });
+    },
     [setQty],
   );
 
@@ -292,14 +314,25 @@ export default function QuickSellScreen() {
         !line ||
         quantityDraft.trim() === "" ||
         !Number.isInteger(parsed) ||
-        parsed < 0
+        parsed < 1
       ) {
         showToast("Enter a valid quantity");
       } else {
         if (parsed > line.availableStock) {
           showToast(`Only ${line.availableStock} left`);
         }
-        setQty(itemId, Math.min(parsed, line.availableStock));
+        const qty = Math.min(parsed, line.availableStock);
+        setQty(itemId, qty);
+        setPriceDrafts((current) => {
+          const next = { ...current };
+          delete next[itemId];
+          return next;
+        });
+        setTotalDrafts((current) => {
+          const next = { ...current };
+          delete next[itemId];
+          return next;
+        });
       }
       setQuantityEditId(null);
       setQuantityDraft("");
@@ -310,13 +343,59 @@ export default function QuickSellScreen() {
   const handlePriceDraft = useCallback(
     (itemId: string, value: string) => {
       setPriceDrafts((current) => ({ ...current, [itemId]: value }));
-      const parsed = Number(value);
-      if (Number.isFinite(parsed) && parsed > 0) setPrice(itemId, parsed);
+      const parsed = parseAmount(value);
+      const line = cartItems.find((cartLine) => cartLine.itemId === itemId);
+      if (Number.isFinite(parsed) && parsed > 0 && line) {
+        setPrice(itemId, parsed);
+        setTotalDrafts((current) => ({
+          ...current,
+          [itemId]: String(roundMoney(parsed * line.qty)),
+        }));
+      } else {
+        setTotalDrafts((current) => ({ ...current, [itemId]: "" }));
+      }
     },
-    [setPrice],
+    [cartItems, setPrice],
   );
 
   const commitPriceDraft = useCallback((itemId: string) => {
+    setPriceDrafts((current) => {
+      const next = { ...current };
+      delete next[itemId];
+      return next;
+    });
+    setTotalDrafts((current) => {
+      const next = { ...current };
+      delete next[itemId];
+      return next;
+    });
+  }, []);
+
+  const handleTotalDraft = useCallback(
+    (itemId: string, value: string) => {
+      setTotalDrafts((current) => ({ ...current, [itemId]: value }));
+      const parsedTotal = parseAmount(value);
+      const line = cartItems.find((cartLine) => cartLine.itemId === itemId);
+      if (line && Number.isFinite(parsedTotal) && parsedTotal > 0 && line.qty > 0) {
+        const unitPrice = parsedTotal / line.qty;
+        setPrice(itemId, unitPrice);
+        setPriceDrafts((current) => ({
+          ...current,
+          [itemId]: String(unitPrice),
+        }));
+      } else {
+        setPriceDrafts((current) => ({ ...current, [itemId]: "" }));
+      }
+    },
+    [cartItems, setPrice],
+  );
+
+  const commitTotalDraft = useCallback((itemId: string) => {
+    setTotalDrafts((current) => {
+      const next = { ...current };
+      delete next[itemId];
+      return next;
+    });
     setPriceDrafts((current) => {
       const next = { ...current };
       delete next[itemId];
@@ -334,6 +413,7 @@ export default function QuickSellScreen() {
           clear();
           setStockErrorItemId(null);
           setPriceDrafts({});
+          setTotalDrafts({});
         },
       },
     ]);
@@ -396,14 +476,20 @@ export default function QuickSellScreen() {
 
     const lines = cartItems.map((line) => {
       const draft = priceDrafts[line.itemId];
-      const unitPrice = draft == null ? line.unitPrice : Number(draft);
+      const unitPrice = draft == null ? line.unitPrice : parseAmount(draft);
       return { line, unitPrice };
     });
     const invalidPrice = lines.find(
-      ({ unitPrice }) => !Number.isFinite(unitPrice) || unitPrice <= 0,
+      ({ line, unitPrice }) =>
+        !Number.isInteger(line.qty) ||
+        line.qty < 1 ||
+        !Number.isFinite(unitPrice) ||
+        unitPrice <= 0 ||
+        !Number.isFinite(unitPrice * line.qty) ||
+        unitPrice * line.qty <= 0,
     );
     if (invalidPrice) {
-      showToast("Enter a valid price", invalidPrice.line.name);
+      showToast("Enter a valid total", invalidPrice.line.name);
       return;
     }
 
@@ -424,6 +510,7 @@ export default function QuickSellScreen() {
 
       clear();
       setPriceDrafts({});
+      setTotalDrafts({});
       setStockErrorItemId(null);
       setReviewVisible(false);
       showToast("Sale recorded");
@@ -555,10 +642,13 @@ export default function QuickSellScreen() {
           onPress={() => setReviewVisible(true)}
           activeOpacity={0.85}
           accessibilityRole="button"
-          accessibilityLabel={`Review ${itemCount} cart items, total ${formatCurrency(total, currency)}`}
+          accessibilityLabel={`Review ${itemCount} cart items, total ${formatCurrency(roundMoney(total), currency)}`}
         >
           <Text style={[styles.cartBarText, { color: colors.primaryText }]}>
-            {cartItems.length} items · {itemCount} units
+            {plural(cartItems.length, "item")} · {plural(itemCount, "unit")}
+          </Text>
+          <Text style={[styles.cartBarText, { color: colors.primaryText }]}>
+            {formatCurrency(roundMoney(total), currency)}
           </Text>
           <Text style={[styles.reviewText, { color: colors.primaryText }]}>Review</Text>
         </TouchableOpacity>
@@ -613,11 +703,20 @@ export default function QuickSellScreen() {
             >
               {cartItems.map((line) => {
                 const priceText = priceDrafts[line.itemId] ?? line.unitPrice.toString();
-                const draftPrice = Number(priceText);
+                const draftPrice = parseAmount(priceText);
                 const displayPrice =
                   Number.isFinite(draftPrice) && draftPrice > 0
                     ? draftPrice
                     : line.unitPrice;
+                const totalText =
+                  totalDrafts[line.itemId] ??
+                  String(roundMoney(line.qty * displayPrice));
+                const cataloguePrice =
+                  items.find((item) => item.id === line.itemId)?.selling_price;
+                const discount =
+                  cataloguePrice != null && displayPrice < cataloguePrice
+                    ? roundMoney((cataloguePrice - displayPrice) * line.qty)
+                    : 0;
                 return (
                   <View
                     key={line.itemId}
@@ -650,27 +749,51 @@ export default function QuickSellScreen() {
                       </TouchableOpacity>
                     </View>
                     <View style={styles.reviewLineControls}>
-                      <View style={styles.reviewPriceWrap}>
-                        <Text style={[styles.reviewLabel, { color: colors.textSecondary }]}>
-                          Unit price
-                        </Text>
-                        <TextInput
-                          style={[
-                            styles.reviewPriceInput,
-                            {
-                              backgroundColor: colors.inputBackground,
-                              borderColor: colors.inputBorder,
-                              color: colors.inputText,
-                            },
-                          ]}
-                          value={priceText}
-                          onChangeText={(value) => handlePriceDraft(line.itemId, value)}
-                          onEndEditing={() => commitPriceDraft(line.itemId)}
-                          keyboardType="decimal-pad"
-                          selectTextOnFocus
-                          editable={!submitting}
-                          accessibilityLabel={`${line.name} unit price`}
-                        />
+                      <View style={styles.reviewMoneyFields}>
+                        <View style={styles.reviewPriceWrap}>
+                          <Text style={[styles.reviewLabel, { color: colors.textSecondary }]}>
+                            Price ({CURRENCIES[currency].symbol})
+                          </Text>
+                          <TextInput
+                            style={[
+                              styles.reviewPriceInput,
+                              {
+                                backgroundColor: colors.inputBackground,
+                                borderColor: colors.inputBorder,
+                                color: colors.inputText,
+                              },
+                            ]}
+                            value={priceText}
+                            onChangeText={(value) => handlePriceDraft(line.itemId, value)}
+                            onEndEditing={() => commitPriceDraft(line.itemId)}
+                            keyboardType="decimal-pad"
+                            selectTextOnFocus
+                            editable={!submitting}
+                            accessibilityLabel={`${line.name} price`}
+                          />
+                        </View>
+                        <View style={styles.reviewPriceWrap}>
+                          <Text style={[styles.reviewLabel, { color: colors.textSecondary }]}>
+                            Total ({CURRENCIES[currency].symbol})
+                          </Text>
+                          <TextInput
+                            style={[
+                              styles.reviewPriceInput,
+                              {
+                                backgroundColor: colors.inputBackground,
+                                borderColor: colors.inputBorder,
+                                color: colors.inputText,
+                              },
+                            ]}
+                            value={totalText}
+                            onChangeText={(value) => handleTotalDraft(line.itemId, value)}
+                            onEndEditing={() => commitTotalDraft(line.itemId)}
+                            keyboardType="decimal-pad"
+                            selectTextOnFocus
+                            editable={!submitting}
+                            accessibilityLabel={`${line.name} total`}
+                          />
+                        </View>
                       </View>
                       <View style={styles.reviewQuantityBlock}>
                         <Text style={[styles.reviewLabel, { color: colors.textSecondary }]}>
@@ -746,8 +869,14 @@ export default function QuickSellScreen() {
                         </View>
                       </View>
                     </View>
+                    {discount > 0 ? (
+                      <Text style={[styles.discountHint, { color: colors.textMuted }]}>
+                        Discount: {formatCurrency(discount, currency)}
+                      </Text>
+                    ) : null}
                     <Text style={[styles.lineTotal, { color: colors.text }]}>
-                      Line total: {formatCurrency(line.qty * displayPrice, currency)}
+                      Line total:{" "}
+                      {formatCurrency(roundMoney(line.qty * displayPrice), currency)}
                     </Text>
                     {stockErrorItemId === line.itemId ? (
                       <Text style={[styles.stockErrorText, { color: colors.dangerText }]}>
@@ -763,7 +892,7 @@ export default function QuickSellScreen() {
               <View style={styles.totalRow}>
                 <Text style={[styles.totalLabel, { color: colors.textSecondary }]}>Total</Text>
                 <Text style={[styles.totalValue, { color: colors.text }]}>
-                  {formatCurrency(total, currency)}
+                  {formatCurrency(roundMoney(total), currency)}
                 </Text>
               </View>
               <TouchableOpacity
@@ -782,7 +911,7 @@ export default function QuickSellScreen() {
                   <ActivityIndicator color={colors.primaryText} />
                 ) : (
                   <Text style={[styles.completeSaleText, { color: colors.primaryText }]}>
-                    Complete sale ({formatCurrency(total, currency)})
+                    Complete sale ({formatCurrency(roundMoney(total), currency)})
                   </Text>
                 )}
               </TouchableOpacity>
@@ -952,11 +1081,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   reviewLineControls: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
+    gap: 10,
   },
-  reviewPriceWrap: { flex: 1, marginRight: 10 },
+  reviewMoneyFields: { flexDirection: "row", gap: 10 },
+  reviewPriceWrap: { flex: 1 },
   reviewLabel: { fontSize: 12, fontWeight: "600", marginBottom: 6 },
   reviewPriceInput: {
     height: 48,
@@ -975,6 +1103,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   lineTotal: { fontSize: 14, fontWeight: "700", textAlign: "right", marginTop: 10 },
+  discountHint: { fontSize: 12, marginTop: 8 },
   stockErrorText: { fontSize: 12, fontWeight: "600", marginTop: 6 },
   reviewFooter: {
     borderTopWidth: 1,

@@ -1,31 +1,32 @@
 import { router } from "expo-router";
 import {
-    AlertCircle,
-    ArrowLeft,
-    CheckCircle2,
-    ChevronDown,
-    ChevronUp,
-    Clock,
-    Moon,
+  AlertCircle,
+  ArrowLeft,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Moon,
 } from "lucide-react-native";
 import { useState } from "react";
 import {
-    ActivityIndicator,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import CompletedJobRow from "../components/completed-job-row";
 import SaleGroupCard from "../components/sale-group-card";
 import StatCard from "../components/stat-card";
 import { formatCurrency } from "../constants/currency";
+import { plural } from "../constants/plural";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
-import { getJobProfit, useTodaysJobs } from "../hooks/use-todays-jobs";
 import { groupSaleRows } from "../hooks/sale-groups";
+import { useTodaysJobs } from "../hooks/use-todays-jobs";
 
 export default function DailyCloseScreen() {
   const { colors, currency } = useTheme();
@@ -178,7 +179,7 @@ export default function DailyCloseScreen() {
                   `• ${job.customer_name || "Walk-in Customer"} — ${job.service}`,
               )
               .join("\n")
-          : `${unfinishedCount} jobs still in progress or pending`;
+          : `${plural(unfinishedCount, "job")} still in progress or pending`;
 
       showFeedback(
         "Unfinished Jobs",
@@ -470,7 +471,7 @@ export default function DailyCloseScreen() {
             </View>
           ) : (
             records.map((entry) => {
-              if (entry.kind === "sale" && entry.group.lines.length > 1) {
+              if (entry.kind === "sale") {
                 return (
                   <SaleGroupCard
                     key={entry.group.id}
@@ -478,80 +479,27 @@ export default function DailyCloseScreen() {
                     colors={colors}
                     currency={currency}
                     isOwner={isOwner}
+                    totalOverride={
+                      entry.group.voided
+                        ? entry.group.lines.reduce(
+                            (total, line) => total + (line.line_total ?? 0),
+                            0,
+                          )
+                        : undefined
+                    }
                   />
                 );
               }
-              const record =
-                entry.kind === "job" ? entry.record : entry.group.lines[0];
-              if (entry.kind === "job") {
-                return (
-                  <CompletedJobRow
-                    key={`job:${record.id}`}
-                    job={record}
-                    colors={colors}
-                    currency={currency}
-                    isOwner={isOwner}
-                    statusColor={colors.statusInProgress}
-                  />
-                );
-              }
-              const profit = getJobProfit(record);
-              const statusText = "Sold";
-              const time = new Date(record.created_at).toLocaleTimeString([], {
-                hour: "numeric",
-                minute: "2-digit",
-              });
-
+              const record = entry.record;
               return (
-                <View
-                  key={entry.group.id}
-                  style={[
-                    styles.recordRow,
-                    { backgroundColor: colors.surface, borderColor: colors.border },
-                  ]}
-                >
-                  <View style={styles.recordMain}>
-                    <Text style={[styles.recordTitle, { color: colors.text }]}>
-                      {record.customer_name || record.service}
-                    </Text>
-                    <Text style={[styles.recordSubtitle, { color: colors.textMuted }]}>
-                      {record.service} · {time}
-                    </Text>
-                    <Text style={[styles.recordDetail, { color: colors.textSecondary }]}>
-                      {isOwner
-                        ? `Quantity ${record.quantity} · Profit ${profit == null ? "—" : formatCurrency(profit, currency)}`
-                        : `Quantity ${record.quantity}`}
-                    </Text>
-                    {isOwner && record.created_by_name ? (
-                      <Text style={[styles.recordSubtitle, { color: colors.textMuted }]}>
-                        by {record.created_by_name}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <View style={styles.recordAside}>
-                    <Text style={[styles.recordAmount, { color: colors.text }]}>
-                      {formatCurrency(record.line_total ?? 0, currency)}
-                    </Text>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        {
-                          backgroundColor: `${colors.statusDone}18`,
-                        },
-                      ]}
-                    >
-                      <CheckCircle2 size={12} color={colors.statusDone} />
-                      <Text
-                        style={[
-                          styles.statusText,
-                          { color: colors.statusDone },
-                        ]}
-                      >
-                        {statusText}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
+                <CompletedJobRow
+                  key={`job:${record.id}`}
+                  job={record}
+                  colors={colors}
+                  currency={currency}
+                  isOwner={isOwner}
+                  statusColor={colors.statusInProgress}
+                />
               );
             })
           )}
@@ -671,32 +619,6 @@ const styles = StyleSheet.create({
   },
   statsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 20 },
   salesStatsGrid: { marginBottom: 24 },
-  recordRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 10,
-  },
-  recordMain: { flex: 1, minWidth: 0 },
-  recordTitle: { fontSize: 14, fontWeight: "700" },
-  recordSubtitle: { fontSize: 12, marginTop: 3 },
-  recordDetail: { fontSize: 12, marginTop: 5 },
-  recordAside: { alignItems: "flex-end", flexShrink: 0 },
-  recordAmount: { fontSize: 14, fontWeight: "700" },
-  statusBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginTop: 5,
-  },
-  statusText: { fontSize: 11, fontWeight: "600" },
   emptyState: {
     minHeight: 100,
     alignItems: "center",
