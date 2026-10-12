@@ -1,16 +1,17 @@
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
+import { isNetworkError } from "../constants/network-error";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
@@ -56,7 +57,10 @@ export default function LoginScreen() {
     });
     setLoading(false);
     if (error) {
-      showFeedback("Login failed", error.message);
+      const message = isNetworkError(error)
+        ? "No internet connection. Connect and try again."
+        : error.message;
+      showFeedback("Login failed", message);
     } else {
       router.replace("/pin" as any);
     }

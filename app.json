@@ -11,13 +11,11 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "com.theless.app",
+      "package": "com.theless.tradeapp",
       "versionCode": 1,
-      "permissions": [
-        "READ_CONTACTS",
-        "android.permission.READ_CONTACTS",
-        "android.permission.WRITE_CONTACTS"
-      ],
+      "permissions": ["android.permission.READ_CONTACTS"],
+      "blockedPermissions": ["android.permission.WRITE_CONTACTS"],
+      
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -53,7 +51,9 @@
       "expo-font",
       "expo-web-browser",
       "expo-image",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-secure-store",
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -64,6 +64,12 @@
       "eas": {
         "projectId": "9dcc8272-990b-49da-be1a-62b6158c50c4"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/9dcc8272-990b-49da-be1a-62b6158c50c4"
     }
   }
 }

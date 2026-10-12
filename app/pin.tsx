@@ -1,16 +1,18 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
+import * as SecureStore from "expo-secure-store";
 import { Delete } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    Vibration,
-    View,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  Vibration,
+  View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import { hashAccountPin, verifyAccountPin } from "../constants/account-pin";
+import { withTimeout } from "../constants/network-error";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
@@ -28,61 +30,81 @@ export default function PinScreen() {
 
   const checkMode = useCallback(async () => {
     const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      data: { session },
+    } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) {
       setError("Please sign in again.");
       return;
     }
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("pin_hash")
-      .eq("id", user.id)
-      .single();
-
-    if (profileError) {
-      setError("Unable to verify PIN. Please try again.");
-      return;
-    }
-
-    let accountPinHash = profile.pin_hash;
-    if (!accountPinHash) {
-      const legacyPin = await AsyncStorage.getItem(`user_pin_${user.id}`);
-      if (legacyPin) {
-        const migratedPinHash = await hashAccountPin(legacyPin, user.id);
-        const { error: migrationError } = await supabase
-          .from("profiles")
-          .update({
-            pin_hash: migratedPinHash,
-            pin_set_at: new Date().toISOString(),
-          })
-          .eq("id", user.id)
-          .select("id")
-          .single();
-
-        if (migrationError) {
-          setError("Unable to migrate existing PIN. Please try again.");
-          return;
-        }
-        accountPinHash = migratedPinHash;
-      }
+    const cachedHash = await SecureStore.getItemAsync(`pin_hash_${user.id}`).catch(() => null);
+    if (cachedHash) {
+      setUserId(user.id);
+      setPinHash(cachedHash);
+      setMode("enter");
     }
 
     try {
-      await AsyncStorage.multiRemove([
-        `user_pin_${user.id}`,
-        `has_set_pin_${user.id}`,
-        "user_pin",
-        "has_set_pin",
-      ]);
-    } catch {
-      // Local PIN data is legacy cleanup only; the profile remains authoritative.
-    }
+      const { data: profile, error: profileError } = await withTimeout(
+        supabase.from("profiles").select("pin_hash").eq("id", user.id).single(),
+        8000,
+      );
+      if (profileError || !profile) throw profileError ?? new Error("No profile");
 
-    setUserId(user.id);
-  setPinHash(accountPinHash);
-  setMode(accountPinHash ? "enter" : "set");
+      let accountPinHash: string | null = profile.pin_hash ?? null;
+      if (!accountPinHash) {
+        const legacyPin = await AsyncStorage.getItem(`user_pin_${user.id}`);
+        if (legacyPin) {
+          const migratedPinHash = await hashAccountPin(legacyPin, user.id);
+          const { error: migrationError } = await supabase
+            .from("profiles")
+            .update({
+              pin_hash: migratedPinHash,
+              pin_set_at: new Date().toISOString(),
+            })
+            .eq("id", user.id)
+            .select("id")
+            .single();
+
+          if (migrationError) {
+            setError("Unable to migrate existing PIN. Please try again.");
+            return;
+          }
+
+          accountPinHash = migratedPinHash;
+        }
+      }
+
+      try {
+        if (accountPinHash) {
+          await SecureStore.setItemAsync(`pin_hash_${user.id}`, accountPinHash);
+        } else {
+          await SecureStore.deleteItemAsync(`pin_hash_${user.id}`);
+        }
+      } catch {
+        // Best effort only; server data remains the source of truth.
+      }
+
+      try {
+        await AsyncStorage.multiRemove([
+          `user_pin_${user.id}`,
+          `has_set_pin_${user.id}`,
+          "user_pin",
+          "has_set_pin",
+        ]);
+      } catch {
+        // Legacy cleanup only.
+      }
+
+      setUserId(user.id);
+      setPinHash(accountPinHash);
+      setMode(accountPinHash ? "enter" : "set");
+    } catch {
+      if (!cachedHash) {
+        setError("Unable to verify PIN. Connect to the internet and try again.");
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -142,6 +164,7 @@ export default function PinScreen() {
         }
 
         setPinHash(nextPinHash);
+        void SecureStore.setItemAsync(`pin_hash_${userId}`, nextPinHash).catch(() => {});
         setPinUnlocked(true, userId);
         navigateAfterPin();
       } else {
