@@ -25,3 +25,12 @@ export function withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T> 
     );
   });
 }
+
+export function friendlyError(
+  error: unknown,
+  fallback = "Something went wrong. Please try again.",
+): string {
+  if (isNetworkError(error)) return "No internet connection. Connect and try again.";
+  const message = (error as { message?: string } | null)?.message;
+  return message && message.length > 0 ? message : fallback;
+}

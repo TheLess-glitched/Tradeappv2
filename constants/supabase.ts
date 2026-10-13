@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
+import { cachingFetch } from "./caching-fetch";
 
 const supabaseUrl = "https://kgdebizxmrdczgjmwkeq.supabase.co";
 const supabaseAnonKey =
@@ -12,4 +13,5 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: false,
   },
+  global: { fetch: cachingFetch },
 });

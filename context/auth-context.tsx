@@ -9,6 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { clearAllCaches } from "../constants/read-cache";
 import { withTimeout } from "../constants/network-error";
 import {
   clearOfflineIdentity,
@@ -88,14 +89,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const promise = (async (): Promise<BusinessResult> => {
         // Cache first: open straight away from what this phone saved last time,
         // then confirm with the server below.
-        if (!force) {
-          const early = await loadOfflineIdentity();
-          if (early && early.userId === uid && early.businessId && early.role) {
-            setBusinessId(early.businessId);
-            setRole(early.role);
-            setBusinessError(false);
-            setIsBusinessReady(true);
-          }
+        const early = await loadOfflineIdentity();
+        if (early && early.userId !== uid) {
+          // A different account is signing in on this phone: drop the previous
+          // account's saved data.
+          void clearAllCaches();
+        }
+        if (!force && early && early.userId === uid && early.businessId && early.role) {
+          setBusinessId(early.businessId);
+          setRole(early.role);
+          setBusinessError(false);
+          setIsBusinessReady(true);
         }
 
         try {
@@ -198,7 +202,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (!isMounted) return;
 
-      if (event === "SIGNED_OUT") void clearOfflineIdentity();
+      if (event === "SIGNED_OUT") {
+        void clearOfflineIdentity();
+        void clearAllCaches();
+      }
 
       setSession(nextSession);
       setIsSessionReady(true);

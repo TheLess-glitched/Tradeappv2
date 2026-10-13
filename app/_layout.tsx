@@ -3,6 +3,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef } from "react";
 import { ActivityIndicator, AppState, Linking, Text, TouchableOpacity, View } from "react-native";
 import { AppFeedbackProvider, showToast } from "../components/app-feedback";
+import { OfflineBanner } from "../components/offline-banner";
 import { supabase } from "../constants/supabase";
 import { AuthProvider, useAuth } from "../context/auth-context";
 import { CartProvider } from "../context/cart-context";
@@ -138,28 +139,31 @@ function RootNavigator() {
           </TouchableOpacity>
         </View>
       ) : (
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.background },
-          }}
-        >
-          <Stack.Screen name="index" />
-          <Stack.Screen name="signup" />
-          <Stack.Screen name="pin" />
-          <Stack.Screen name="no-business" />
-          <Stack.Screen name="inventory" />
-          <Stack.Screen name="catalogue-detail" />
-          <Stack.Screen name="new-job" />
-          <Stack.Screen name="settings" />
-          <Stack.Screen name="team" />
-          <Stack.Screen name="join-business" />
-          <Stack.Screen name="daily-close" />
-          <Stack.Screen name="history" />
-          <Stack.Screen name="notes" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="modal" />
-        </Stack>
+        <>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.background },
+            }}
+          >
+            <Stack.Screen name="index" />
+            <Stack.Screen name="signup" />
+            <Stack.Screen name="pin" />
+            <Stack.Screen name="no-business" />
+            <Stack.Screen name="inventory" />
+            <Stack.Screen name="catalogue-detail" />
+            <Stack.Screen name="new-job" />
+            <Stack.Screen name="settings" />
+            <Stack.Screen name="team" />
+            <Stack.Screen name="join-business" />
+            <Stack.Screen name="daily-close" />
+            <Stack.Screen name="history" />
+            <Stack.Screen name="notes" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="modal" />
+          </Stack>
+          <OfflineBanner />
+        </>
       )}
     </View>
   );
