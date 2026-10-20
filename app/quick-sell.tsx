@@ -1,6 +1,7 @@
+import * as Crypto from "expo-crypto";
 import { router, useFocusEffect } from "expo-router";
 import { ArrowLeft, Search, ShoppingCart, X } from "lucide-react-native";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -18,11 +19,21 @@ import {
 import { showDialog, showToast } from "../components/app-feedback";
 import SellModal, { SellModalItem } from "../components/sell-modal";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
+import { friendlyError, isNetworkError } from "../constants/network-error";
 import { plural } from "../constants/plural";
+import { trackedCatalogueListQuery } from "../constants/queries";
+import {
+  enqueueSale,
+  QueuedSale,
+  removeSale,
+  retrySale,
+} from "../constants/sale-queue";
 import { supabase } from "../constants/supabase";
+import { fetchTodayRecords } from '../constants/today-records';
 import { useAuth } from "../context/auth-context";
 import { CartLine, useCart } from "../context/cart-context";
 import { useTheme } from "../context/theme-context";
+import { getOfflinePendingQuantities, useOfflineSales } from "../hooks/use-offline-sales";
 
 type TrackedCatalogueItem = {
   id: string;
@@ -184,7 +195,7 @@ const QuickSellRow = memo(function QuickSellRow({
 });
 
 export default function QuickSellScreen() {
-  const { businessId } = useAuth();
+  const { businessId, user } = useAuth();
   const { colors, currency } = useTheme();
   const {
     items: cartItems,
@@ -212,6 +223,28 @@ export default function QuickSellScreen() {
   const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
   const [totalDrafts, setTotalDrafts] = useState<Record<string, string>>({});
   const [stockErrorItemId, setStockErrorItemId] = useState<string | null>(null);
+  const queuedSales = useOfflineSales(user?.id, businessId);
+  const saleIdRef = useRef<{ fingerprint: string; id: string; occurredAt: string } | null>(null);
+
+  const pendingSalesCount = queuedSales.filter((sale) => sale.status === "pending").length;
+  const needsAttentionCount = queuedSales.filter(
+    (sale) => sale.status === "needs_attention",
+  ).length;
+  const pendingQuantities = useMemo(
+    () => getOfflinePendingQuantities(queuedSales),
+    [queuedSales],
+  );
+  const displayItems = useMemo(
+    () =>
+      items.map((item) => ({
+        ...item,
+        quantity: Math.max(
+          0,
+          Math.floor(item.quantity) - (pendingQuantities[item.id] ?? 0),
+        ),
+      })),
+    [items, pendingQuantities],
+  );
 
   const fetchTrackedItems = useCallback(async () => {
     if (!hasDataRef.current) {
@@ -224,16 +257,13 @@ export default function QuickSellScreen() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("catalogue")
-        .select("id, name, selling_price, cost_price, quantity, unit, reorder_level, track_stock")
-        .eq("business_id", businessId)
-        .eq("track_stock", true)
-        .order("name", { ascending: true });
+      const { data, error } = await trackedCatalogueListQuery(businessId);
 
       if (!error && data) {
         setItems(data);
         hasDataRef.current = data.length > 0;
+      } else if (error && !hasDataRef.current) {
+        showToast("Items not saved yet", "Connect to the internet once to load your items.");
       }
     } catch {
       // silently handle
@@ -247,6 +277,15 @@ export default function QuickSellScreen() {
       fetchTrackedItems();
     }, [fetchTrackedItems]),
   );
+
+  useEffect(() => {
+    for (const line of cartItems) {
+      const item = displayItems.find((entry) => entry.id === line.itemId);
+      if (item && item.quantity !== line.availableStock) {
+        setAvailableStock(line.itemId, item.quantity);
+      }
+    }
+  }, [cartItems, displayItems, setAvailableStock]);
 
   const handleAdd = useCallback(
     (item: TrackedCatalogueItem) => {
@@ -411,6 +450,7 @@ export default function QuickSellScreen() {
         style: "destructive",
         onPress: () => {
           clear();
+          saleIdRef.current = null;
           setStockErrorItemId(null);
           setPriceDrafts({});
           setTotalDrafts({});
@@ -418,6 +458,25 @@ export default function QuickSellScreen() {
       },
     ]);
   }, [clear]);
+
+  const reviewAttentionSale = useCallback((sale: QueuedSale) => {
+    showDialog("Offline sale needs attention", sale.error || "The server rejected this sale.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Retry",
+        onPress: () => {
+          void retrySale(sale.id);
+        },
+      },
+      {
+        text: "Discard",
+        style: "destructive",
+        onPress: () => {
+          void removeSale(sale.id);
+        },
+      },
+    ]);
+  }, []);
 
   const handleStockError = useCallback(
     (error: { message: string; details?: string | null }) => {
@@ -473,6 +532,10 @@ export default function QuickSellScreen() {
 
   const completeCartSale = useCallback(async () => {
     if (submittingRef.current || cartItems.length === 0) return;
+    if (!businessId || !user?.id) {
+      showToast("Couldn't complete sale", "Your business account is not ready.");
+      return;
+    }
 
     const lines = cartItems.map((line) => {
       const draft = priceDrafts[line.itemId];
@@ -495,36 +558,88 @@ export default function QuickSellScreen() {
 
     submittingRef.current = true;
     setSubmitting(true);
-    try {
-      const { error } = await supabase.rpc("record_sale_cart", {
-        p_lines: lines.map(({ line, unitPrice }) => ({
+    const saleLines = lines.map(({ line, unitPrice }) => ({
+      catalogue_item_id: line.itemId,
+      quantity: line.qty,
+      unit_price: unitPrice,
+    }));
+    const fingerprint = JSON.stringify([businessId, user.id, saleLines]);
+    if (!saleIdRef.current || saleIdRef.current.fingerprint !== fingerprint) {
+      saleIdRef.current = {
+        fingerprint,
+        id: Crypto.randomUUID(),
+        occurredAt: new Date().toISOString(),
+      };
+    }
+    const sale = saleIdRef.current;
+
+    const saveOfflineSale = async () => {
+      await enqueueSale({
+        id: sale.id,
+        businessId,
+        userId: user.id,
+        lines: lines.map(({ line, unitPrice }) => ({
           catalogue_item_id: line.itemId,
           quantity: line.qty,
           unit_price: unitPrice,
+          name: line.name,
         })),
+        reason: "Sale",
+        occurredAt: sale.occurredAt,
+      });
+      clear();
+      saleIdRef.current = null;
+      setPriceDrafts({});
+      setTotalDrafts({});
+      setStockErrorItemId(null);
+      setReviewVisible(false);
+      showToast("Sale saved offline", "It will sync when your connection returns.");
+    };
+    try {
+      const { error } = await supabase.rpc("record_sale_cart_v2", {
+        p_client_id: sale.id,
+        p_lines: saleLines,
+        p_reason: "Sale",
+        p_occurred_at: sale.occurredAt,
+        p_offline: false,
       });
       if (error) {
+        const code = (error as { code?: string }).code;
+        if (!code && isNetworkError(error)) {
+          await saveOfflineSale();
+          return;
+        }
         handleStockError(error);
         return;
       }
-
       clear();
+      saleIdRef.current = null;
       setPriceDrafts({});
       setTotalDrafts({});
       setStockErrorItemId(null);
       setReviewVisible(false);
       showToast("Sale recorded");
       await fetchTrackedItems();
+      if (businessId) void fetchTodayRecords(businessId).catch(() => {});
     } catch (error) {
-      showToast(
-        "Couldn't complete sale",
-        error instanceof Error ? error.message : "An unexpected error occurred.",
-      );
+      const code = (error as { code?: string } | null)?.code;
+      if (!code && isNetworkError(error)) {
+        try {
+          await saveOfflineSale();
+        } catch (queueError) {
+          showToast(
+            "Sale not saved",
+            friendlyError(queueError, "Unable to store the sale on this device."),
+          );
+        }
+      } else {
+        showToast("Couldn't complete sale", friendlyError(error, "An unexpected error occurred."));
+      }
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
     }
-  }, [cartItems, priceDrafts, handleStockError, clear, fetchTrackedItems]);
+  }, [businessId, user, cartItems, priceDrafts, handleStockError, clear, fetchTrackedItems]);
 
   const cartById = useMemo(
     () => new Map(cartItems.map((line) => [line.itemId, line])),
@@ -533,10 +648,10 @@ export default function QuickSellScreen() {
 
   const filteredItems = useMemo(
     () =>
-      items.filter((item) =>
+      displayItems.filter((item) =>
         item.name.toLowerCase().includes(search.toLowerCase()),
       ),
-    [items, search],
+    [displayItems, search],
   );
 
   const isLowStock = (item: TrackedCatalogueItem) =>
@@ -895,6 +1010,26 @@ export default function QuickSellScreen() {
                   {formatCurrency(roundMoney(total), currency)}
                 </Text>
               </View>
+              {pendingSalesCount > 0 ? (
+                <Text style={[styles.queueSummary, { color: colors.textSecondary }]}>
+                  Includes {plural(pendingSalesCount, "offline sale")} in today&apos;s totals
+                </Text>
+              ) : null}
+              {needsAttentionCount > 0 ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    const sale = queuedSales.find(
+                      (entry) => entry.status === "needs_attention",
+                    );
+                    if (sale) reviewAttentionSale(sale);
+                  }}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.queueAttention, { color: colors.dangerText }]}>
+                    {plural(needsAttentionCount, "offline sale")} need attention · Tap to review
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 style={[
                   styles.completeSaleButton,
@@ -1119,6 +1254,18 @@ const styles = StyleSheet.create({
   },
   totalLabel: { fontSize: 15, fontWeight: "600" },
   totalValue: { fontSize: 20, fontWeight: "800" },
+  queueSummary: {
+    fontSize: 12,
+    fontWeight: "500",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  queueAttention: {
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    marginBottom: 8,
+  },
   completeSaleButton: {
     minHeight: 52,
     borderRadius: 12,

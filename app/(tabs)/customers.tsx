@@ -1,7 +1,8 @@
 import * as Contacts from "expo-contacts/legacy";
+import * as Crypto from "expo-crypto";
 import { useFocusEffect } from "expo-router";
 import { MessageCircle, Phone } from "lucide-react-native";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -13,12 +14,22 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { showFeedback } from "../../components/app-feedback";
+import { showFeedback, showToast } from "../../components/app-feedback";
+import ContactPickerModal from "../../components/contact-picker-modal";
+import { friendlyError, isNetworkError } from "../../constants/network-error";
+import {
+  enqueueCustomer,
+  OutboxItem,
+  removeOutbox,
+  retryOutbox,
+} from "../../constants/outbox";
 import { normalizePhone } from "../../constants/phone";
+import { customerByPhoneQuery, customersListQuery } from "../../constants/queries";
 import { supabase } from "../../constants/supabase";
 import { ThemeColors } from "../../constants/theme";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
+import { useOutbox } from "../../hooks/use-outbox";
 
 type Customer = {
   id: number;
@@ -26,6 +37,13 @@ type Customer = {
   phone: string;
   service_type: string;
   created_at: string;
+};
+
+type ListCustomer = Customer & {
+  key: string;
+  outboxId?: string;
+  waiting?: "pending" | "needs_attention";
+  error?: string | null;
 };
 
 function SearchHeader({
@@ -58,12 +76,13 @@ function SearchHeader({
 }
 
 export default function CustomersScreen() {
-  const { businessId } = useAuth();
+  const { businessId, user } = useAuth();
   const { colors, defaultCountryCode } = useTheme();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
+  const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [serviceType, setServiceType] = useState("");
@@ -71,8 +90,15 @@ export default function CustomersScreen() {
   const [search, setSearch] = useState("");
   const searchRef = useRef(search);
   const colorsRef = useRef(colors);
+  const hasDataRef = useRef(false);
   searchRef.current = search;
   colorsRef.current = colors;
+
+  const outbox = useOutbox(user?.id, businessId);
+  const waitingCustomers = outbox.filter(
+    (item): item is Extract<OutboxItem, { kind: "customer" }> =>
+      item.kind === "customer",
+  );
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true);
@@ -81,12 +107,16 @@ export default function CustomersScreen() {
       setLoading(false);
       return;
     }
-    const { data, error } = await supabase
-      .from("customers")
-      .select("*")
-      .eq("business_id", businessId)
-      .order("created_at", { ascending: false });
-    if (!error && data) setCustomers(data);
+    const { data, error } = await customersListQuery(businessId);
+    if (!error && data) {
+      setCustomers(data);
+      hasDataRef.current = data.length > 0;
+    } else if (error && !hasDataRef.current && isNetworkError(error)) {
+      showToast(
+        "Customers not saved yet",
+        "Connect to the internet once to load your customers.",
+      );
+    }
     setLoading(false);
   }, [businessId]);
 
@@ -95,6 +125,59 @@ export default function CustomersScreen() {
       fetchCustomers();
     }, [fetchCustomers]),
   );
+
+  // When a waiting customer syncs, reload so the real row replaces the tag.
+  const prevWaitingRef = useRef(0);
+  useEffect(() => {
+    if (waitingCustomers.length < prevWaitingRef.current) void fetchCustomers();
+    prevWaitingRef.current = waitingCustomers.length;
+  }, [waitingCustomers.length, fetchCustomers]);
+
+    const resetForm = () => {
+    setName("");
+    setPhone("");
+    setServiceType("");
+    setModalVisible(false);
+  };
+
+  const isOfflineError = (error: unknown) =>
+    !(error as { code?: string } | null)?.code && isNetworkError(error);
+
+  const saveOffline = async (trimmedName: string, trimmedPhone: string) => {
+    setSaving(false);
+    if (!user?.id || !businessId) {
+      showFeedback("Error", "No active business is available.");
+      return;
+    }
+    const savedSame = customers.find((c) => c.phone === trimmedPhone);
+    const waitingSame = waitingCustomers.find(
+      (item) => item.payload.phone === trimmedPhone,
+    );
+    if (savedSame || waitingSame) {
+      showToast(
+        "Already saved",
+        `This number is already saved for ${savedSame?.name ?? waitingSame?.payload.name}.`,
+      );
+      resetForm();
+      return;
+    }
+    try {
+      await enqueueCustomer({
+        id: Crypto.randomUUID(),
+        businessId,
+        userId: user.id,
+        payload: {
+          name: trimmedName,
+          phone: trimmedPhone,
+          serviceType: serviceType.trim() || null,
+        },
+      });
+      resetForm();
+      showToast("Customer saved", "It will sync when your connection returns.");
+    } catch (error) {
+      showFeedback("Couldn't save customer", friendlyError(error, "Please try again."));
+    }
+  };
 
   const handleAddCustomer = async () => {
     const trimmedName = name.trim();
@@ -120,28 +203,29 @@ export default function CustomersScreen() {
         service_type: serviceType,
       });
 
-      setSaving(false);
       if (error) {
+        if (isOfflineError(error)) {
+          await saveOffline(trimmedName, trimmedPhone);
+          return;
+        }
+        setSaving(false);
         showFeedback("Error", error.message);
         return;
       }
 
-      setName("");
-      setPhone("");
-      setServiceType("");
-      setModalVisible(false);
+      setSaving(false);
+      resetForm();
       fetchCustomers();
     };
 
-    const { data: existingCustomer, error: lookupError } = await supabase
-      .from("customers")
-      .select("id, name")
-      .eq("business_id", businessId)
-      .eq("phone", trimmedPhone)
-      .limit(1)
-      .maybeSingle();
+    const { data: existingCustomer, error: lookupError } =
+      await customerByPhoneQuery(businessId, trimmedPhone);
 
     if (lookupError) {
+      if (isOfflineError(lookupError)) {
+        await saveOffline(trimmedName, trimmedPhone);
+        return;
+      }
       setSaving(false);
       showFeedback("Error", lookupError.message);
       return;
@@ -155,10 +239,7 @@ export default function CustomersScreen() {
     setSaving(false);
 
     if (existingCustomer.name.trim() === trimmedName) {
-      setName("");
-      setPhone("");
-      setServiceType("");
-      setModalVisible(false);
+      resetForm();
       return;
     }
 
@@ -169,12 +250,7 @@ export default function CustomersScreen() {
         {
           text: "Use existing customer",
           style: "cancel",
-          onPress: () => {
-            setName("");
-            setPhone("");
-            setServiceType("");
-            setModalVisible(false);
-          },
+          onPress: resetForm,
         },
         { text: "Save as new", onPress: insertCustomer },
       ],
@@ -195,20 +271,19 @@ export default function CustomersScreen() {
       return;
     }
 
-    const contact = await Contacts.presentContactPickerAsync();
-    if (!contact) return;
+    setModalVisible(false);
+    setContactPickerVisible(true);
+  };
 
-    const contactPhone = contact.phoneNumbers?.[0]?.number?.trim();
-    if (!contact.name?.trim() || !contactPhone) {
-      showFeedback(
-        "No phone number found",
-        "The selected contact does not have a phone number to import.",
-      );
-      return;
-    }
-
-    setName(contact.name.trim());
-    setPhone(normalizePhone(contactPhone, defaultCountryCode) ?? "");
+  const handleContactChosen = (contactName: string, contactNumber: string) => {
+    setName(contactName.trim());
+    setPhone(normalizePhone(contactNumber, defaultCountryCode) ?? "");
+    setContactPickerVisible(false);
+    setModalVisible(true);
+  };
+  const handleContactPickerClose = () => {
+    setContactPickerVisible(false);
+    setModalVisible(true);
   };
 
   const handleCall = (customer: Customer) =>
@@ -221,11 +296,33 @@ export default function CustomersScreen() {
     Linking.openURL(`https://wa.me/${number}`);
   };
 
-  const filtered = customers.filter(
+  const allCustomers: ListCustomer[] = [
+    ...waitingCustomers.map((item) => ({
+      key: `q-${item.id}`,
+      id: -1,
+      name: item.payload.name,
+      phone: item.payload.phone,
+      service_type: item.payload.serviceType ?? "",
+      created_at: item.occurredAt,
+      outboxId: item.id,
+      waiting: item.status,
+      error: item.error,
+    })),
+    ...customers.map((c) => ({ ...c, key: `c-${c.id}` })),
+  ];
+
+  const filtered = allCustomers.filter(
     (c) =>
       c.name.toLowerCase().includes(search.toLowerCase()) ||
       c.phone.includes(normalizePhone(search, defaultCountryCode) ?? ""),
   );
+
+  const retryCustomer = (id?: string) => {
+    if (id) void retryOutbox(id);
+  };
+  const discardCustomer = (id?: string) => {
+    if (id) void removeOutbox(id);
+  };
 
   const renderSearchHeader = useCallback(
     () => (
@@ -239,7 +336,7 @@ export default function CustomersScreen() {
   );
 
   const renderCustomerItem = useCallback(
-    ({ item: customer }: { item: Customer }) => (
+    ({ item: customer }: { item: ListCustomer }) => (
       <View
         style={[
           styles.customerCard,
@@ -272,8 +369,35 @@ export default function CustomersScreen() {
                 {customer.service_type}
               </Text>
             ) : null}
+            {customer.waiting === "pending" ? (
+              <Text style={[styles.customerService, { color: colors.textMuted }]}>
+                Waiting to sync
+              </Text>
+            ) : null}
           </View>
         </View>
+
+        {customer.waiting === "needs_attention" ? (
+          <View style={styles.attentionRow}>
+            <Text style={[styles.customerService, { color: colors.dangerText }]}>
+              Not saved: {customer.error ?? "The server rejected this customer."}
+            </Text>
+            <View style={styles.attentionButtons}>
+              <TouchableOpacity
+                style={[styles.attentionButton, { borderColor: colors.border }]}
+                onPress={() => retryCustomer(customer.outboxId)}
+              >
+                <Text style={[styles.contactBtnText, { color: colors.text }]}>Retry</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.attentionButton, { borderColor: colors.danger }]}
+                onPress={() => discardCustomer(customer.outboxId)}
+              >
+                <Text style={[styles.contactBtnText, { color: colors.danger }]}>Discard</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
 
         <View style={[styles.contactButtons, { borderTopColor: colors.border }]}>
           <TouchableOpacity
@@ -361,7 +485,7 @@ export default function CustomersScreen() {
       ) : (
         <FlatList
           data={filtered}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={(item) => item.key}
           renderItem={renderCustomerItem}
           ListHeaderComponent={renderSearchHeader}
           ListEmptyComponent={() => (
@@ -487,6 +611,7 @@ export default function CustomersScreen() {
           </View>
         </View>
       </Modal>
+      <ContactPickerModal visible={contactPickerVisible} onClose={handleContactPickerClose} onSelect={handleContactChosen} />
     </View>
   );
 }
@@ -568,6 +693,14 @@ const styles = StyleSheet.create({
   customerName: { fontSize: 17, fontWeight: "700" },
   customerPhone: { fontSize: 13, marginTop: 2 },
   customerService: { fontSize: 12, marginTop: 4, fontWeight: "600" },
+  attentionRow: { marginBottom: 12 },
+  attentionButtons: { flexDirection: "row", gap: 8, marginTop: 8 },
+  attentionButton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
   contactButtons: {
     flexDirection: "row",
     gap: 8,

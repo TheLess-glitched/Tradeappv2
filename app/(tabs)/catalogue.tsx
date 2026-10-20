@@ -8,7 +8,7 @@ import {
   Trash2,
   X,
 } from "lucide-react-native";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -23,9 +23,15 @@ import {
 import { showFeedback } from "../../components/app-feedback";
 import SellModal from "../../components/sell-modal";
 import { CURRENCIES, formatCurrency } from "../../constants/currency";
+import { catalogueListQuery } from "../../constants/queries";
 import { supabase } from "../../constants/supabase";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
+import {
+  getOfflinePendingQuantities,
+  useOfflineSales,
+} from "../../hooks/use-offline-sales";
+
 
 type CatalogueItem = {
   id: string;
@@ -56,6 +62,25 @@ export default function CatalogueScreen() {
   const [selectedItem, setSelectedItem] = useState<CatalogueItem | null>(null);
   const [sellModalVisible, setSellModalVisible] = useState(false);
   const [sellingItem, setSellingItem] = useState<CatalogueItem | null>(null);
+
+  const queuedSales = useOfflineSales(session?.user?.id, businessId);
+  const pendingQuantities = useMemo(
+    () => getOfflinePendingQuantities(queuedSales),
+    [queuedSales],
+  );
+  const displayItems = useMemo(
+    () =>
+      items.map((item) => ({
+        ...item,
+        quantity: item.track_stock
+          ? Math.max(
+              0,
+              Math.floor(item.quantity) - (pendingQuantities[item.id] ?? 0),
+            )
+          : item.quantity,
+      })),
+    [items, pendingQuantities],
+  );
 
   const [name, setName] = useState("");
   const [category, setCategory] = useState("General");
@@ -91,11 +116,7 @@ export default function CatalogueScreen() {
       setLoading(false);
       return;
     }
-    const { data, error } = await supabase
-      .from("catalogue")
-      .select("*")
-      .eq("business_id", businessId)
-      .order("created_at", { ascending: false });
+    const { data, error } = await catalogueListQuery(businessId);
     if (!error && data) {
       setItems(data);
       hasDataRef.current = data.length > 0;
@@ -267,14 +288,18 @@ export default function CatalogueScreen() {
   const isLowStock = (item: CatalogueItem) =>
     item.reorder_level > 0 && item.quantity <= item.reorder_level;
 
-  const filteredItems = items.filter(
-    (item) =>
-      item.name.toLowerCase().includes(search.toLowerCase()) ||
-      item.category.toLowerCase().includes(search.toLowerCase()) ||
-      (item.supplier &&
-        item.supplier.toLowerCase().includes(search.toLowerCase())) ||
-      (item.location &&
-        item.location.toLowerCase().includes(search.toLowerCase())),
+  const filteredItems = useMemo(
+    () =>
+      displayItems.filter(
+        (item) =>
+          item.name.toLowerCase().includes(search.toLowerCase()) ||
+          item.category.toLowerCase().includes(search.toLowerCase()) ||
+          (item.supplier &&
+            item.supplier.toLowerCase().includes(search.toLowerCase())) ||
+          (item.location &&
+            item.location.toLowerCase().includes(search.toLowerCase())),
+      ),
+    [displayItems, search],
   );
 
   return (
@@ -890,6 +915,7 @@ export default function CatalogueScreen() {
       <SellModal
         visible={sellModalVisible}
         item={sellingItem}
+        maxQuantity={sellingItem?.quantity}
         onClose={() => {
           setSellModalVisible(false);
           setSellingItem(null);

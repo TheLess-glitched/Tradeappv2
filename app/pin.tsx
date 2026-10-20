@@ -13,13 +13,15 @@ import {
 import { showFeedback } from "../components/app-feedback";
 import { hashAccountPin, verifyAccountPin } from "../constants/account-pin";
 import { withTimeout } from "../constants/network-error";
+import { getUnsyncedSalesCountForUser } from "../constants/sale-queue";
+import { signOutIfOnline } from "../constants/safe-sign-out";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 export default function PinScreen() {
   const { colors, setPinUnlocked } = useTheme();
-  const { role, isBusinessReady, businessError } = useAuth();
+  const { role, isBusinessReady, businessError, user } = useAuth();
 
   const [pin, setPin] = useState("");
   const [mode, setMode] = useState<"enter" | "set" | "confirm">("enter");
@@ -203,7 +205,29 @@ export default function PinScreen() {
         text: "Log Out",
         style: "destructive",
         onPress: async () => {
-          await supabase.auth.signOut();
+          if (user?.id) {
+            try {
+              const count = await getUnsyncedSalesCountForUser(user.id);
+              if (count > 0) {
+                showFeedback(
+                  "Items not synced",
+                  `Sync or resolve ${count} unsynced ${count === 1 ? "item" : "items"} before signing out.`,
+                );
+                return;
+              }
+            } catch (error) {
+              showFeedback(
+                "Couldn't check offline sales",
+                error instanceof Error ? error.message : "Please try again.",
+              );
+              return;
+            }
+          }
+          const result = await signOutIfOnline();
+          if (!result.ok) {
+            showFeedback("Can't sign out", result.message ?? "Please try again.");
+            return;
+          }
           setPinUnlocked(false);
           router.replace("/" as any);
         },

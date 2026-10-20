@@ -1,41 +1,43 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import {
-    ArrowLeft,
-    Check,
-    ChevronDown,
-    ChevronRight,
-    KeyRound,
-    LogOut,
-    Moon,
-    Search,
-    Smartphone,
-    Sun,
-    X,
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  KeyRound,
+  LogOut,
+  Moon,
+  Search,
+  Smartphone,
+  Sun,
+  X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import { CURRENCIES, CurrencyCode, DEFAULT_CURRENCY } from "../constants/currency";
 import { DEFAULT_COUNTRY_CODE } from "../constants/phone";
+import { getUnsyncedSalesCountForUser } from "../constants/sale-queue";
+import { signOutIfOnline } from "../constants/safe-sign-out";
 import { supabase } from "../constants/supabase";
 import { ThemeMode } from "../constants/theme";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 export default function SettingsScreen() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const isOwner = role === "owner";
   const { colors, isDark, themeMode, setThemeMode, setPinUnlocked, currency, setCurrency, defaultCountryCode, setDefaultCountryCode } = useTheme();
 
@@ -155,9 +157,27 @@ export default function SettingsScreen() {
         text: "Log Out",
         style: "destructive",
         onPress: async () => {
-          const { error } = await supabase.auth.signOut();
-          if (error) {
-            showFeedback("Error", error.message);
+          if (user?.id) {
+            try {
+              const count = await getUnsyncedSalesCountForUser(user.id);
+              if (count > 0) {
+                showFeedback(
+                  "Items not synced",
+                  `Sync or resolve ${count} unsynced ${count === 1 ? "item" : "items"} before signing out.`,
+                );
+                return;
+              }
+            } catch (error) {
+              showFeedback(
+                "Couldn't check offline sales",
+                error instanceof Error ? error.message : "Please try again.",
+              );
+              return;
+            }
+          }
+          const result = await signOutIfOnline();
+          if (!result.ok) {
+            showFeedback("Can't sign out", result.message ?? "Please try again.");
             return;
           }
           setPinUnlocked(false);

@@ -1,26 +1,27 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
-    Calendar,
-    CheckSquare,
-    Clock,
-    FileText,
-    Square,
+  Calendar,
+  CheckSquare,
+  Clock,
+  FileText,
+  Square,
 } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-    FlatList,
-    Linking,
-    Modal,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  FlatList,
+  Linking,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { showFeedback, showToast } from "../../components/app-feedback";
 import VoidRecordDialog from "../../components/void-record-dialog";
 import { formatCurrency } from "../../constants/currency";
 import { normalizePhone } from "../../constants/phone";
+import { customerPhoneByNameQuery, jobsListQuery } from "../../constants/queries";
 import { supabase } from "../../constants/supabase";
 import { getStatusStyle, ThemeColors } from "../../constants/theme";
 import { useAuth } from "../../context/auth-context";
@@ -130,12 +131,7 @@ export default function JobsScreen() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select("id, customer_name, customer_phone, service, record_type, line_total, date, time, notes, status, created_at, created_by, created_by_name, voided_at, void_reason")
-        .eq("business_id", businessId)
-        .eq("record_type", "job")
-        .order("created_at", { ascending: false });
+      const { data, error } = await jobsListQuery(businessId);
 
       if (error) throw error;
 
@@ -172,15 +168,13 @@ export default function JobsScreen() {
         if (normalized) return normalized;
       }
 
-      if (job.customer_name?.trim()) {
+      const customerName = job.customer_name?.trim();
+      if (customerName) {
         try {
-          const { data: customerData } = await supabase
-            .from("customers")
-            .select("phone")
-            .eq("name", job.customer_name.trim())
-            .eq("business_id", businessId)
-            .limit(1)
-            .maybeSingle();
+          const { data: customerData } = await customerPhoneByNameQuery(
+            businessId,
+            customerName,
+          );
 
           if (customerData?.phone) {
             const normalized = normalizePhone(customerData.phone);

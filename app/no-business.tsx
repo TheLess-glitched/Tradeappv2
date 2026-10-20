@@ -2,19 +2,39 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { showDialog, showToast } from "../components/app-feedback";
+import { getUnsyncedSalesCountForUser } from "../constants/sale-queue";
+import { signOutIfOnline } from "../constants/safe-sign-out";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
 
 export default function NoBusinessScreen() {
   const { colors, setPinUnlocked } = useTheme();
-  const { refreshBusiness } = useAuth();
+  const { refreshBusiness, user } = useAuth();
   const [creatingBusiness, setCreatingBusiness] = useState(false);
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      showToast("Couldn't sign out", error.message);
+    if (user?.id) {
+      try {
+        const count = await getUnsyncedSalesCountForUser(user.id);
+        if (count > 0) {
+          showToast(
+            "Items not synced",
+            `Sync or resolve ${count} unsynced ${count === 1 ? "item" : "items"} before signing out.`,
+          );
+          return;
+        }
+      } catch (error) {
+        showToast(
+          "Couldn't check offline sales",
+          error instanceof Error ? error.message : "Please try again.",
+        );
+        return;
+      }
+    }
+    const result = await signOutIfOnline();
+    if (!result.ok) {
+      showToast("Can't sign out", result.message ?? "Please try again.");
       return;
     }
     setPinUnlocked(false);

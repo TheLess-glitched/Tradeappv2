@@ -152,7 +152,13 @@ export default function CommandCenter() {
   const userId = session?.user?.id;
   const isOwner = role === "owner";
   const isWorker = role === "worker";
-  const { totalRevenue, completedJobsToday, salesCompletedToday } = useTodaysJobs();
+  const {
+    totalRevenue,
+    completedJobsToday,
+    salesCompletedToday,
+    offlineSalesCount,
+    offlineSalesRevenue,
+  } = useTodaysJobs();
   const mySalesToday = salesCompletedToday.filter(
     (sale) => sale.created_by === session?.user?.id,
   );
@@ -164,7 +170,7 @@ export default function CommandCenter() {
   );
   const myDayRevenue = [...mySalesToday, ...myJobsToday].reduce(
     (total, record) => total + (record.line_total ?? 0),
-    0,
+    offlineSalesRevenue,
   );
 
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -637,8 +643,12 @@ const openJobsSubtitle =
             valueColor={colors.primaryText}
             subtitle={
               isWorker
-                ? `${plural(mySalesTodayGroups.length, "sale")} · ${plural(myJobsToday.length, "job")} done`
-                : "Tap for today's summary & Close Day"
+                ? offlineSalesCount > 0
+                  ? `Includes ${plural(offlineSalesCount, "offline sale")} · ${plural(mySalesTodayGroups.length + offlineSalesCount, "sale")} · ${plural(myJobsToday.length, "job")} done`
+                  : `${plural(mySalesTodayGroups.length, "sale")} · ${plural(myJobsToday.length, "job")} done`
+                : offlineSalesCount > 0
+                  ? `Includes ${plural(offlineSalesCount, "offline sale")} · Tap for today's summary`
+                  : "Tap for today's summary & Close Day"
             }
             subtitleColor={colors.primaryText}
             subtitleFontSize={13}

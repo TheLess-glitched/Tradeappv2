@@ -64,6 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isOffline, setIsOffline] = useState(false);
   const isOfflineRef = useRef(false);
   const userIdRef = useRef<string | undefined>(undefined);
+  const businessIdRef = useRef<string | null>(null);
 
   // De-duplicates loads: one load per user unless forced or the last load failed.
   const inFlight = useRef<{ userId: string; promise: Promise<BusinessResult> } | null>(null);
@@ -84,7 +85,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const uid = userId;
-      setIsBusinessReady(false);
+      // Only show the loading state on the first load. A background refresh must not
+      // flip "ready" off, or the screens underneath get reset.
+      if (!businessIdRef.current) setIsBusinessReady(false);
 
       const promise = (async (): Promise<BusinessResult> => {
         // Cache first: open straight away from what this phone saved last time,
@@ -170,6 +173,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     userIdRef.current = session?.user?.id;
   }, [session]);
+
+  useEffect(() => {
+    businessIdRef.current = businessId;
+  }, [businessId]);
 
   // When the connection comes back, confirm everything with the server.
   useEffect(() => {

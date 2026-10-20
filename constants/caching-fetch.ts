@@ -34,6 +34,16 @@ export function subscribeStale(listener: StaleListener): () => void {
   };
 }
 
+
+export async function clearReadCache(): Promise<void> {
+  try {
+    const keys = (await Storage.getAllKeys()).filter((key) => key.startsWith(PREFIX));
+    for (const key of keys) await Storage.removeItem(key);
+  } catch {
+    // best effort
+  }
+}
+
 function notifyStale(savedAt: number) {
   staleListeners.forEach((listener) => listener(savedAt));
 }

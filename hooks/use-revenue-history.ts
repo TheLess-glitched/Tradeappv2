@@ -1,6 +1,8 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState } from "react";
 import { showToast } from "../components/app-feedback";
+import { friendlyError, isNetworkError } from '../constants/network-error';
+import { firstRecordQuery } from '../constants/queries';
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import type { TodayRecord } from "./use-todays-jobs";
@@ -36,6 +38,25 @@ function toDayRecords(value: string): { start: string; end: string } {
     start: `${value}T00:00:00+01:00`,
     end: `${next}T00:00:00+01:00`,
   };
+}
+
+// Offline, a month before the first record or after today can't hold sales.
+async function isOutsideRecordedMonths(
+  businessId: string,
+  year: number,
+  month: number,
+): Promise<boolean> {
+  try {
+    const now = new Date();
+    const selected = year * 12 + month;
+    if (selected > now.getFullYear() * 12 + now.getMonth() + 1) return true;
+    const { data, error } = await firstRecordQuery(businessId);
+    if (error || !data || data.length === 0) return false;
+    const first = new Date(data[0].created_at);
+    return selected < first.getFullYear() * 12 + first.getMonth() + 1;
+  } catch {
+    return false;
+  }
 }
 
 export function useRevenueHistory(year: number, month: number) {
@@ -96,11 +117,22 @@ export function useRevenueHistory(year: number, month: number) {
       setRows(parsedRows);
     } catch (error) {
       setRows([]);
-      setError(true);
-      showToast(
-        "Couldn't load revenue history",
-        error instanceof Error ? error.message : "Please try again.",
-      );
+      if (
+        businessId &&
+        isNetworkError(error) &&
+        (await isOutsideRecordedMonths(businessId, year, month))
+      ) {
+        setError(false);
+      } else if (isNetworkError(error)) {
+        setError(true);
+        showToast(
+          "This month isn't saved on your phone",
+          "Connect to the internet once to view it. Months you've opened online stay available offline.",
+        );
+      } else {
+        setError(true);
+        showToast("Couldn't load revenue history", friendlyError(error, "Please try again."));
+      }
     } finally {
       setLoading(false);
     }
@@ -163,11 +195,18 @@ export function useRevenueHistory(year: number, month: number) {
           }));
           return records;
         } catch (error) {
-          showToast(
-            "Couldn't load this day's records",
-            error instanceof Error ? error.message : "Please try again.",
+          if (isNetworkError(error)) {
+            showToast(
+              "This day isn't saved on your phone",
+              "Connect to the internet once to view it. Days you've opened online stay available offline."
+            );
+          } else {
+            showToast(
+              "Couldn't load this day's records",
+              friendlyError(error, "Please try again.")
           );
-          return [];
+        }
+        return [];
         } finally {
           dayRequestsRef.current.delete(cacheKey);
           setLoadingDayState((current) =>

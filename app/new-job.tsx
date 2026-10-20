@@ -1,4 +1,7 @@
 import { router } from "expo-router";
+import * as Crypto from "expo-crypto";
+import { isNetworkError } from "../constants/network-error";
+import { enqueueJob } from "../constants/outbox";
 import { Calendar, Check, ChevronDown, Clock, Search, X } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -18,9 +21,19 @@ import { showFeedback } from "../components/app-feedback";
 import { COUNTRIES, Country, DEFAULT_COUNTRY } from "../constants/countries";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
 import { normalizePhone } from "../constants/phone";
+import {
+  customerByPhoneQuery,
+  jobCataloguePickerQuery,
+  jobCustomerPickerQuery,
+} from "../constants/queries";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
+import {
+  getOfflinePendingQuantities,
+  useOfflineSales,
+} from "../hooks/use-offline-sales";
+import { useOutbox } from "../hooks/use-outbox";
 
 type CatalogueItem = {
   id: string;
@@ -39,7 +52,7 @@ type Customer = {
 };
 
 export default function NewJobScreen() {
-  const { businessId } = useAuth();
+  const { businessId, user } = useAuth();
   const { colors, currency, defaultCountryCode } = useTheme();
 
   const [customerName, setCustomerName] = useState("");
@@ -50,10 +63,45 @@ export default function NewJobScreen() {
   const [service, setService] = useState("");
   const [price, setPrice] = useState("");
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>([]);
+  const queuedSales = useOfflineSales(user?.id, businessId);
+  const pendingQuantities = useMemo(
+    () => getOfflinePendingQuantities(queuedSales),
+    [queuedSales],
+  );
+  const displayCatalogueItems = useMemo(
+    () =>
+      catalogueItems.map((item) => ({
+        ...item,
+        quantity: item.track_stock
+          ? Math.max(
+              0,
+              Math.floor(item.quantity) - (pendingQuantities[item.id] ?? 0),
+            )
+          : item.quantity,
+      })),
+    [catalogueItems, pendingQuantities],
+  );
   const [catalogueLoading, setCatalogueLoading] = useState(true);
   const [cataloguePickerVisible, setCataloguePickerVisible] = useState(false);
   const [selectedCatalogueItem, setSelectedCatalogueItem] = useState<CatalogueItem | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const outbox = useOutbox(user?.id, businessId);
+  const displayCustomers = useMemo(() => {
+    const existingPhones = new Set(customers.map((c) => c.phone));
+    const waiting: Customer[] = [];
+    let nextId = -1;
+    for (const item of outbox) {
+      if (item.kind === "customer" && !existingPhones.has(item.payload.phone)) {
+        existingPhones.add(item.payload.phone);
+        waiting.push({
+          id: nextId--,
+          name: item.payload.name,
+          phone: item.payload.phone,
+        });
+      }
+    }
+    return [...waiting, ...customers];
+  }, [customers, outbox]);
   const [customerPickerVisible, setCustomerPickerVisible] = useState(false);
   const wasSelectedFromPickerRef = useRef(false);
   const [estimatedFinishAt, setEstimatedFinishAt] = useState<Date | null>(null);
@@ -122,11 +170,7 @@ export default function NewJobScreen() {
           return;
         }
 
-        const { data } = await supabase
-          .from("catalogue")
-          .select("id, name, quantity, unit, selling_price, track_stock, reorder_level")
-          .eq("business_id", businessId)
-          .order("name", { ascending: true });
+        const { data } = await jobCataloguePickerQuery(businessId);
 
         setCatalogueItems(data ?? []);
       } finally {
@@ -141,11 +185,7 @@ export default function NewJobScreen() {
         setCustomers([]);
         return;
       }
-      const { data } = await supabase
-        .from("customers")
-        .select("id, name, phone")
-        .eq("business_id", businessId)
-        .order("name", { ascending: true });
+      const { data } = await jobCustomerPickerQuery(businessId);
       setCustomers(data ?? []);
     };
     loadCustomers();
@@ -205,6 +245,8 @@ export default function NewJobScreen() {
       return;
     }
 
+    const jobClientId = Crypto.randomUUID();
+
     const trimmedCustomerName = customerName.trim();
 
     // 1. Format the phone number dynamically using the selected country code
@@ -218,21 +260,64 @@ export default function NewJobScreen() {
       }
     }
 
+    const saveOffline = async (addCustomer: boolean) => {
+      if (!user?.id) {
+        setLoading(false);
+        showFeedback("Error", "No active user is available.");
+        return;
+      }
+      try {
+        await enqueueJob({
+          id: jobClientId,
+          businessId,
+          userId: user.id,
+          payload: {
+            customerName: trimmedCustomerName || null,
+            customerPhone: formattedPhone || null,
+            service: service.trim(),
+            price: parseInt(price.replace(/[^0-9]/g, ""), 10) || 0,
+            estimatedFinishAt: estimatedFinishAt
+              ? estimatedFinishAt.toISOString()
+              : null,
+            notes: notes.trim(),
+            addCustomer,
+          },
+        });
+        setLoading(false);
+        showFeedback(
+          "Job saved",
+          "It will sync when your connection returns.",
+          [{ text: "OK", onPress: () => router.replace("/(tabs)/jobs" as any) }],
+        );
+      } catch (error) {
+        setLoading(false);
+        showFeedback(
+          "Couldn't save job",
+          error instanceof Error ? error.message : "Please try again.",
+        );
+      }
+    };
+
     let shouldInsertCustomer = false;
     if (
       formattedPhone &&
       trimmedCustomerName &&
       !wasSelectedFromPickerRef.current
     ) {
-      const { data: existingCustomer, error: lookupError } = await supabase
-        .from("customers")
-        .select("id, name")
-        .eq("business_id", businessId)
-        .eq("phone", formattedPhone)
-        .limit(1)
-        .maybeSingle();
+      const { data: existingCustomer, error: lookupError } =
+        await customerByPhoneQuery(businessId, formattedPhone);
 
       if (lookupError) {
+        if (!lookupError.code && isNetworkError(lookupError)) {
+          await saveOffline(
+            Boolean(
+              formattedPhone &&
+                trimmedCustomerName &&
+                !wasSelectedFromPickerRef.current,
+            ),
+          );
+          return;
+        }
         setLoading(false);
         showFeedback("Error", lookupError.message);
         return;
@@ -266,6 +351,7 @@ export default function NewJobScreen() {
     const { data: createdJob, error: jobError } = await supabase
       .from("jobs")
       .insert({
+        client_id: jobClientId,
         user_id: businessId,
         business_id: businessId,
         customer_name: customerName.trim() || null,
@@ -280,6 +366,11 @@ export default function NewJobScreen() {
       })
       .select("id")
       .single();
+
+    if (jobError && !jobError.code && isNetworkError(jobError)) {
+      await saveOffline(shouldInsertCustomer);
+      return;
+    }
 
     const lowStockAlertMessage: string | null = null;
 
@@ -816,7 +907,7 @@ export default function NewJobScreen() {
               </TouchableOpacity>
             </View>
             <FlatList
-              data={customers}
+              data={displayCustomers}
               keyExtractor={(item) => String(item.id)}
               keyboardShouldPersistTaps="handled"
               ListEmptyComponent={<Text style={[styles.emptyPickerText, { color: colors.textMuted }]}>No saved customers available.</Text>}
@@ -864,7 +955,7 @@ export default function NewJobScreen() {
               <Text style={[styles.emptyPickerText, { color: colors.textMuted }]}>No catalogue items available.</Text>
             ) : (
               <FlatList
-                data={catalogueItems}
+                data={displayCatalogueItems}
                 keyExtractor={(item) => item.id}
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (

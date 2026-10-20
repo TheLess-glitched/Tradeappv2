@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
+import { friendlyError, isNetworkError } from "../constants/network-error";
 import { supabase } from "../constants/supabase";
 import { useTheme } from "../context/theme-context";
 import { showFeedback } from "./app-feedback";
@@ -156,7 +157,7 @@ export default function SellModal({
       showFeedback("Invalid quantity", "Please enter a valid quantity greater than 0.");
       return;
     }
-    if (mode === "cart" && maxQuantity != null && parsedQty > maxQuantity) {
+    if (maxQuantity != null && parsedQty > maxQuantity) {
       showFeedback("Stock Error", `Only ${maxQuantity} available`);
       return;
     }
@@ -192,11 +193,15 @@ export default function SellModal({
       );
 
       if (error) {
-        showFeedback("Sale failed", error.message);
+        showFeedback(
+          isNetworkError(error) ? "Sale not confirmed" : "Sale failed",
+          isNetworkError(error)
+            ? "No internet connection. Check History before retrying, in case it went through."
+            : friendlyError(error),
+        );
         setLoading(false);
         return;
       }
-
       const saleResult = Array.isArray(data) ? data[0] : data;
       const saleRecorded = saleResult?.updated === true;
       const newQuantity =
@@ -218,9 +223,10 @@ export default function SellModal({
       onComplete?.();
       showFeedback("Sale Complete", "Sale recorded successfully.");
     } catch (err: any) {
-      showFeedback("Error", err?.message || "An unexpected error occurred.");
-    } finally {
-      setLoading(false);
+      showFeedback(
+        isNetworkError(err) ? "Sale not confirmed" : "Error",
+        friendlyError(err, "An unexpected error occurred.")
+      );
     }
   };
 

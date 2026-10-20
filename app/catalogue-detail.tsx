@@ -7,7 +7,7 @@ import {
     Pencil,
     X,
 } from "lucide-react-native";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
     Modal,
     ScrollView,
@@ -19,9 +19,14 @@ import {
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
+import { catalogueItemQuery } from "../constants/queries";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
+import {
+    getOfflinePendingQuantities,
+    useOfflineSales,
+} from "../hooks/use-offline-sales";
 
 type Item = {
   id: string;
@@ -80,6 +85,14 @@ export default function CatalogueDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [item, setItem] = useState<Item | null>(null);
+  const queuedSales = useOfflineSales(session?.user?.id, businessId);
+  const pendingQuantities = useMemo(
+    () => getOfflinePendingQuantities(queuedSales),
+    [queuedSales],
+  );
+  const displayQuantity = item
+    ? Math.max(0, Math.floor(item.quantity) - (pendingQuantities[item.id] ?? 0))
+    : 0;
   const [movements, setMovements] = useState<Movement[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,12 +139,7 @@ export default function CatalogueDetailScreen() {
       return;
     }
 
-    const { data: itemData } = await supabase
-      .from("catalogue")
-      .select("*")
-      .eq("id", id)
-      .eq("business_id", businessId)
-      .single();
+    const { data: itemData } = await catalogueItemQuery(id, businessId);
     const { data: movData } = await supabase
       .from("catalogue_stock_movements")
       .select("*")
@@ -190,7 +198,7 @@ export default function CatalogueDetailScreen() {
     if (!movQty || !item) return;
     const qty = parseFloat(movQty);
 
-    if (movType === "out" && qty > item.quantity) {
+    if (movType === "out" && qty > displayQuantity) {
       showFeedback("Error", "Cannot remove more than current stock.");
       return;
     }
@@ -250,7 +258,7 @@ export default function CatalogueDetailScreen() {
     });
 
   const isLowStock =
-    item && item.reorder_level > 0 && item.quantity <= item.reorder_level;
+    item && item.reorder_level > 0 && displayQuantity <= item.reorder_level;
 
   if (loading) {
     return (
@@ -336,7 +344,7 @@ export default function CatalogueDetailScreen() {
                   isLowStock && { color: colors.danger },
                 ]}
               >
-                {item.quantity}
+                {displayQuantity}
               </Text>
               <Text style={[styles.heroUnit, { color: colors.textMuted }]}>{item.unit}</Text>
             </View>

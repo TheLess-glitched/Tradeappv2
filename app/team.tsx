@@ -1,5 +1,6 @@
-import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Clipboard from "expo-clipboard";
+import { router } from "expo-router";
 import { ArrowLeft, Users } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -12,8 +13,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import * as Clipboard from "expo-clipboard";
 import { showDialog, showToast } from "../components/app-feedback";
+import { friendlyError } from "../constants/network-error";
 import { supabase } from "../constants/supabase";
 import { useAuth } from "../context/auth-context";
 import { useTheme } from "../context/theme-context";
@@ -64,7 +65,7 @@ export default function TeamScreen() {
     } catch (error) {
       showToast(
         "Couldn't load team",
-        error instanceof Error ? error.message : "Please try again.",
+        friendlyError(error, "Please try again."),
       );
     } finally {
       setRefreshing(false);
@@ -85,7 +86,7 @@ export default function TeamScreen() {
         if (isActive) {
           showToast(
             "Couldn't load team",
-            error instanceof Error ? error.message : "Please try again.",
+            friendlyError(error, "Please try again."),
           );
         }
       })
@@ -143,7 +144,7 @@ export default function TeamScreen() {
               } catch (error) {
                 showToast(
                   "Couldn't copy code",
-                  error instanceof Error ? error.message : "Please try again.",
+                  friendlyError(error, "Please try again."),
                 );
               }
             },
@@ -156,7 +157,7 @@ export default function TeamScreen() {
               } catch (error) {
                 showToast(
                   "Couldn't share code",
-                  error instanceof Error ? error.message : "Please try again.",
+                  friendlyError(error, "Please try again."),
                 );
               }
             },
@@ -167,7 +168,7 @@ export default function TeamScreen() {
     } catch (error) {
       showToast(
         "Couldn't create invite",
-        error instanceof Error ? error.message : "Please try again.",
+        friendlyError(error, "Please try again."),
       );
     } finally {
       setCreatingInvite(false);

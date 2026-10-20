@@ -42,6 +42,8 @@ export default function DailyCloseScreen() {
     completedJobs,
     salesCount,
     unitsSold,
+    offlineSalesCount,
+    offlineSalesRevenue,
     jobsRevenue,
     salesRevenue,
     totalRevenue,
@@ -75,7 +77,7 @@ export default function DailyCloseScreen() {
   );
   const myDayRevenue = [...myCompletedJobs, ...myCompletedSales].reduce(
     (sum, record) => sum + (record.line_total ?? 0),
-    0,
+    offlineSalesRevenue,
   );
   const dailySaleGroups = groupSaleRows(salesForDisplay).filter(
     (group) =>
@@ -267,6 +269,11 @@ export default function DailyCloseScreen() {
             >
               {formatCurrency(isWorker ? myDayRevenue : totalRevenue, currency)}
             </Text>
+            {offlineSalesCount > 0 ? (
+              <Text style={[styles.revenueLine, { color: colors.textSecondary }]}>
+                Includes {plural(offlineSalesCount, "offline sale")}
+              </Text>
+            ) : null}
             <View style={styles.revenueLines}>
               {isOwner ? (
                 <>
