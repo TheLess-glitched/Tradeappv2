@@ -1,13 +1,13 @@
-import { router } from "expo-router";
+import * as Contacts from "expo-contacts/legacy";
 import * as Crypto from "expo-crypto";
-import { isNetworkError } from "../constants/network-error";
-import { enqueueJob } from "../constants/outbox";
+import { router } from "expo-router";
 import { Calendar, Check, ChevronDown, Clock, Search, X } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -18,8 +18,11 @@ import {
   View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
+import ContactPickerModal from "../components/contact-picker-modal";
 import { COUNTRIES, Country, DEFAULT_COUNTRY } from "../constants/countries";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
+import { isNetworkError } from "../constants/network-error";
+import { enqueueJob } from "../constants/outbox";
 import { normalizePhone } from "../constants/phone";
 import {
   customerByPhoneQuery,
@@ -103,6 +106,7 @@ export default function NewJobScreen() {
     return [...waiting, ...customers];
   }, [customers, outbox]);
   const [customerPickerVisible, setCustomerPickerVisible] = useState(false);
+  const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const wasSelectedFromPickerRef = useRef(false);
   const [estimatedFinishAt, setEstimatedFinishAt] = useState<Date | null>(null);
   const [finishPickerVisible, setFinishPickerVisible] = useState(false);
@@ -226,6 +230,31 @@ export default function NewJobScreen() {
     setCustomerName(customer.name);
     setCustomerPhone(customer.phone);
     setCustomerPickerVisible(false);
+  };
+
+  const handleImportFromContacts = async () => {
+    const { status } = await Contacts.requestPermissionsAsync();
+    if (status !== Contacts.PermissionStatus.GRANTED) {
+      showFeedback(
+        "Contacts permission needed",
+        "TradeApp needs contacts access to import a customer's name and phone number.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => Linking.openSettings() },
+        ],
+      );
+      return;
+    }
+    setContactPickerVisible(true);
+  };
+
+  const handleContactChosen = (contactName: string, contactNumber: string) => {
+    // Not "selected from the saved customers", so the job also adds this
+    // person to Customers when the number is new.
+    wasSelectedFromPickerRef.current = false;
+    setCustomerName(contactName.trim());
+    setCustomerPhone(normalizePhone(contactNumber, defaultCountryCode) ?? "");
+    setContactPickerVisible(false);
   };
 
   const handleSave = async () => {
@@ -516,6 +545,26 @@ export default function NewJobScreen() {
             />
           </View>
         </View>
+
+            <TouchableOpacity
+              style={{
+                borderWidth: 1,
+                borderRadius: 10,
+                paddingVertical: 12,
+                alignItems: "center",
+                marginBottom: 16,
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              }}
+              onPress={() => void handleImportFromContacts()}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Import customer from contacts"
+            >
+              <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }}>
+                Import from contacts
+              </Text>
+            </TouchableOpacity>
 
         <View style={styles.fieldWrapper}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>Service</Text>
@@ -1378,6 +1427,11 @@ export default function NewJobScreen() {
           </View>
         </View>
       </Modal>
+        <ContactPickerModal
+        visible={contactPickerVisible}
+        onClose={() => setContactPickerVisible(false)}
+        onSelect={handleContactChosen}
+        />
     </KeyboardAvoidingView>
   );
 }
