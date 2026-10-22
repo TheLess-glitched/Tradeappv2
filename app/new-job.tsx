@@ -488,7 +488,7 @@ export default function NewJobScreen() {
             onPress={() => void handleChooseCustomer()}
             activeOpacity={0.7}
           >
-            <Text style={[styles.cataloguePickerText, { color: colors.textSecondary }]}>Choose Existing Customer</Text>
+            <Text style={[styles.cataloguePickerText, { color: colors.textSecondary }]}>Choose Customer</Text>
             <ChevronDown size={16} color={colors.textMuted} />
           </TouchableOpacity>
           <TextInput

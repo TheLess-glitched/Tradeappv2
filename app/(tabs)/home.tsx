@@ -32,6 +32,7 @@ import {
 import { showFeedback, showToast } from "../../components/app-feedback";
 import StatCard from "../../components/stat-card";
 import { formatCurrency } from "../../constants/currency";
+import { OutboxItem, subscribeOutbox } from "../../constants/outbox";
 import { plural } from "../../constants/plural";
 import { supabase } from "../../constants/supabase";
 import { getStatusStyle } from "../../constants/theme";
@@ -39,6 +40,7 @@ import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
 import { describeSaleGroup, groupSaleRows, SaleGroup } from "../../hooks/sale-groups";
 import { useOpenJobs } from "../../hooks/use-open-jobs";
+import { useOutbox } from "../../hooks/use-outbox";
 import { useTodaysJobs } from "../../hooks/use-todays-jobs";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -220,7 +222,8 @@ export default function CommandCenter() {
     },
   ];
 
-  const fetchJobs = useCallback(async () => {
+    const outbox = useOutbox(userId, businessId);
+    const fetchJobs = useCallback(async () => {
     if (!hasDataRef.current) {
       setLoading(true);
     }
@@ -254,9 +257,62 @@ export default function CommandCenter() {
     }
   }, [businessId]);
 
-  const recentActivity = useMemo(() => {
+    const recentActivity = useMemo(() => {
+    const rank = (status: string) =>
+      status === "done" ? 2 : status === "in_progress" ? 1 : 0;
+
+    // Status changes made offline show straight away until they sync.
+    const queuedStatus: Record<number, "in_progress" | "done"> = {};
+    for (const item of outbox) {
+      if (item.kind !== "status" || item.status === "needs_attention") continue;
+      const current = queuedStatus[item.payload.jobId];
+      if (!current || item.payload.newStatus === "done") {
+        queuedStatus[item.payload.jobId] = item.payload.newStatus;
+      }
+    }
+
+    // Jobs saved offline that have not reached the server yet.
+    const waitingJobs = outbox
+      .filter(
+        (item): item is Extract<OutboxItem, { kind: "job" }> =>
+          item.kind === "job" && item.status === "pending",
+      )
+      .map(
+        (item, index) =>
+          ({
+            id: -(index + 1),
+            customer_name: item.payload.customerName,
+            service: item.payload.service,
+            record_type: "job" as const,
+            status: "pending" as const,
+            time: new Date(item.occurredAt).toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+            }),
+            line_total: item.payload.price,
+            quantity: 1,
+            unit_price: item.payload.price,
+            created_at: item.occurredAt,
+            created_by: userId ?? null,
+            created_by_name: null,
+            sale_group_id: null,
+            voided_at: null,
+            void_reason: null,
+          }) as Job,
+      );
+
+    const displayJobs: Job[] = [
+      ...waitingJobs,
+      ...jobs.map((job) => {
+        const queued = queuedStatus[job.id];
+        return queued && rank(queued) > rank(job.status)
+          ? { ...job, status: queued }
+          : job;
+      }),
+    ];
+
     const saleGroups = groupSaleRows(
-      jobs.filter((record) => record.record_type === "sale"),
+      displayJobs.filter((record) => record.record_type === "sale"),
     )
       .filter((group) => !group.voided)
       .map((group) => ({
@@ -265,7 +321,7 @@ export default function CommandCenter() {
         group,
         created_at: group.earliestTimestamp,
       }));
-    const jobRows = jobs
+    const jobRows = displayJobs
       .filter((record) => record.record_type === "job" && !record.voided_at)
       .map((job) => ({
         id: `job:${job.id}`,
@@ -280,7 +336,7 @@ export default function CommandCenter() {
           new Date(left.created_at).getTime(),
       )
       .slice(0, 2);
-  }, [jobs]);
+  }, [jobs, outbox, userId]);
 
   const handleOpenNotifications = useCallback(async () => {
     setNotifModalOpen(true);
@@ -523,8 +579,53 @@ export default function CommandCenter() {
     }).start(() => setDrawerOpen(false));
   };
 
-const { pending: pendingCount, inProgress: inProgressCount } = useOpenJobs();
-const openJobs = pendingCount + inProgressCount;
+  const {
+    pending: serverPending,
+    inProgress: serverInProgress,
+    refetch: refetchOpenJobs,
+  } = useOpenJobs();
+
+  // Add jobs waiting to sync, and move jobs whose status changed offline.
+  const adjustedOpen = (() => {
+    let pending = serverPending;
+    let inProgress = serverInProgress;
+    const queued: Record<number, "in_progress" | "done"> = {};
+    for (const item of outbox) {
+      if (item.kind === "job" && item.status === "pending") {
+        pending += 1;
+      } else if (item.kind === "status" && item.status !== "needs_attention") {
+        const current = queued[item.payload.jobId];
+        if (!current || item.payload.newStatus === "done") {
+          queued[item.payload.jobId] = item.payload.newStatus;
+        }
+      }
+    }
+    for (const job of jobs) {
+      const target = queued[job.id];
+      if (!target || job.record_type !== "job" || job.voided_at) continue;
+      const from = job.status === "pending" ? 0 : job.status === "in_progress" ? 1 : 2;
+      const to = target === "in_progress" ? 1 : 2;
+      if (to <= from) continue;
+      if (from === 0) pending -= 1;
+      if (from === 1) inProgress -= 1;
+      if (to === 1) inProgress += 1;
+    }
+    return { pending: Math.max(0, pending), inProgress: Math.max(0, inProgress) };
+  })();
+  const pendingCount = adjustedOpen.pending;
+  const inProgressCount = adjustedOpen.inProgress;
+  const openJobs = pendingCount + inProgressCount;
+
+  // When the outbox changes (a job syncs, or a new one is saved), reload so the
+  // real rows replace the waiting ones.
+  useEffect(
+    () =>
+      subscribeOutbox(() => {
+        void fetchJobs();
+        void refetchOpenJobs();
+      }),
+    [fetchJobs, refetchOpenJobs],
+  );
 const openJobsSubtitle =
   openJobs === 0
     ? "All caught up"

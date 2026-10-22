@@ -30,6 +30,7 @@ import { getStatusStyle, ThemeColors } from "../../constants/theme";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
 import { useOutbox } from "../../hooks/use-outbox";
+;
 
 type Job = {
   id: number;
@@ -138,7 +139,7 @@ export default function JobsScreen() {
   filterRef.current = filter;
   colorsRef.current = colors;
 
-  const fetchJobs = useCallback(async () => {
+    const fetchJobs = useCallback(async () => {
     if (!hasDataRef.current) {
       setLoading(true);
     }

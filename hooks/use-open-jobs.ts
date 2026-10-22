@@ -40,5 +40,5 @@ export function useOpenJobs() {
     }, [fetchOpenJobs]),
   );
 
-  return counts;
+  return { ...counts, refetch: fetchOpenJobs };
 }

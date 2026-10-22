@@ -103,7 +103,11 @@ function ContactPickerSheet({
 
     const list: Row[] = [];
     if (recentMatches.length > 0) {
-      list.push({ key: "h-recent", kind: "header", title: "Your customers" });
+      list.push({
+        key: "h-recent",
+        kind: "header",
+        title: `Your customers (${recentMatches.length})`,
+      });
       recentMatches.forEach((r) =>
         list.push({
           key: `r-${r.id}`,
@@ -115,7 +119,11 @@ function ContactPickerSheet({
       );
     }
     if (contactMatches.length > 0) {
-      list.push({ key: "h-contacts", kind: "header", title: "Phone contacts" });
+      list.push({
+        key: "h-contacts",
+        kind: "header",
+        title: `Phone contacts (${contactMatches.length})`,
+      });
       contactMatches.forEach((c) =>
         list.push({
           key: `c-${c.id}`,
@@ -191,7 +199,12 @@ function ContactPickerSheet({
             }
             renderItem={({ item }) =>
               item.kind === "header" ? (
-                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    { color: colors.text, backgroundColor: colors.surfaceSubtle },
+                  ]}
+                >
                   {item.title}
                 </Text>
               ) : (
@@ -268,11 +281,14 @@ const styles = StyleSheet.create({
   loader: { marginTop: 16, marginBottom: 16 },
   message: { textAlign: "center", marginTop: 32, fontSize: 14 },
   sectionTitle: {
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    marginTop: 12,
-    marginBottom: 4,
+    fontSize: 14,
+    fontWeight: "800",
+    marginTop: 16,
+    marginBottom: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    overflow: "hidden",
   },
   row: { paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
   name: { fontSize: 15, fontWeight: "600" },
