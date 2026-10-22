@@ -289,9 +289,9 @@ export default function JobsScreen() {
   const queueWaitingStatus = async (
     clientJobId: string,
     newStatus: "in_progress" | "done",
-  ) => {
+  ): Promise<boolean> => {
     const userId = session?.user?.id;
-    if (!userId || !businessId) return;
+    if (!userId || !businessId) return false;
     try {
       await enqueueStatus({
         id: Crypto.randomUUID(),
@@ -299,14 +299,13 @@ export default function JobsScreen() {
         userId,
         payload: { clientJobId, newStatus },
       });
-      if (newStatus === "done") {
-        showToast("Job marked as completed", "It will sync with the job.");
-      }
+      return true;
     } catch (error) {
       showFeedback(
         "Couldn't save the change",
         error instanceof Error ? error.message : "Please try again.",
       );
+      return false;
     }
   };
   const cycleStatus = async (job: Job) => {
@@ -317,21 +316,27 @@ export default function JobsScreen() {
       return;
     }
 
-    const waitingJob = job as ListJob;
+  const waitingJob = job as ListJob;
     if (waitingJob.waiting === "pending" && waitingJob.outboxId) {
       const clientJobId = waitingJob.outboxId;
-      const next: "in_progress" | "done" =
-        job.status === "pending" ? "in_progress" : "done";
-      showFeedback(
-        "Update Status",
-        next === "in_progress"
-          ? 'Change status to "In Progress"?'
-          : "Mark this job as completed?",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Update", onPress: () => void queueWaitingStatus(clientJobId, next) },
-        ],
-      );
+      if (job.status === "in_progress") {
+        // Completing: offer the customer message, the same as for jobs on the server.
+        const usablePhone = await getUsablePhoneForJob(job);
+        if (usablePhone) {
+          setJobToComplete({ ...job, customer_phone: usablePhone });
+          setConfirmModal(true);
+        } else if (await queueWaitingStatus(clientJobId, "done")) {
+          showToast("Job marked as completed");
+        }
+        return;
+      }
+      showFeedback("Update Status", 'Change status to "In Progress"?', [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Update",
+          onPress: () => void queueWaitingStatus(clientJobId, "in_progress"),
+        },
+      ]);
       return;
     }
     if (job.status === "pending") {
@@ -364,7 +369,11 @@ export default function JobsScreen() {
   };
 
   const finalizeJob = async (job: Job, method: "sms" | "whatsapp" | "none") => {
-    const success = await updateStatus(job.id, "done");
+    const waitingJob = job as ListJob;
+    const success =
+      waitingJob.waiting === "pending" && waitingJob.outboxId
+        ? await queueWaitingStatus(waitingJob.outboxId, "done")
+        : await updateStatus(job.id, "done");
     if (!success) {
       setConfirmModal(false);
       setJobToComplete(null);
