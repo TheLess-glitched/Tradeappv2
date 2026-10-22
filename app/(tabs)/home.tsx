@@ -261,13 +261,17 @@ export default function CommandCenter() {
     const rank = (status: string) =>
       status === "done" ? 2 : status === "in_progress" ? 1 : 0;
 
-    // Status changes made offline show straight away until they sync.
     const queuedStatus: Record<number, "in_progress" | "done"> = {};
+    const queuedByClient: Record<string, "in_progress" | "done"> = {};
     for (const item of outbox) {
       if (item.kind !== "status" || item.status === "needs_attention") continue;
-      const current = queuedStatus[item.payload.jobId];
-      if (!current || item.payload.newStatus === "done") {
-        queuedStatus[item.payload.jobId] = item.payload.newStatus;
+      const { jobId, clientJobId, newStatus } = item.payload;
+      if (jobId !== undefined) {
+        if (!queuedStatus[jobId] || newStatus === "done") queuedStatus[jobId] = newStatus;
+      } else if (clientJobId) {
+        if (!queuedByClient[clientJobId] || newStatus === "done") {
+          queuedByClient[clientJobId] = newStatus;
+        }
       }
     }
 
@@ -284,7 +288,7 @@ export default function CommandCenter() {
             customer_name: item.payload.customerName,
             service: item.payload.service,
             record_type: "job" as const,
-            status: "pending" as const,
+            status: queuedByClient[item.id] ?? "pending",
             time: new Date(item.occurredAt).toLocaleTimeString("en-US", {
               hour: "numeric",
               minute: "2-digit",
@@ -585,21 +589,30 @@ export default function CommandCenter() {
     refetch: refetchOpenJobs,
   } = useOpenJobs();
 
-  // Add jobs waiting to sync, and move jobs whose status changed offline.
   const adjustedOpen = (() => {
     let pending = serverPending;
     let inProgress = serverInProgress;
     const queued: Record<number, "in_progress" | "done"> = {};
+    const queuedByClient: Record<string, "in_progress" | "done"> = {};
     for (const item of outbox) {
-      if (item.kind === "job" && item.status === "pending") {
-        pending += 1;
-      } else if (item.kind === "status" && item.status !== "needs_attention") {
-        const current = queued[item.payload.jobId];
-        if (!current || item.payload.newStatus === "done") {
-          queued[item.payload.jobId] = item.payload.newStatus;
+      if (item.kind !== "status" || item.status === "needs_attention") continue;
+      const { jobId, clientJobId, newStatus } = item.payload;
+      if (jobId !== undefined) {
+        if (!queued[jobId] || newStatus === "done") queued[jobId] = newStatus;
+      } else if (clientJobId) {
+        if (!queuedByClient[clientJobId] || newStatus === "done") {
+          queuedByClient[clientJobId] = newStatus;
         }
       }
     }
+    // Jobs waiting to sync, at whatever status they were last moved to.
+    for (const item of outbox) {
+      if (item.kind !== "job" || item.status !== "pending") continue;
+      const target = queuedByClient[item.id];
+      if (target === "in_progress") inProgress += 1;
+      else if (target !== "done") pending += 1;
+    }
+    // Jobs already on the server whose status was changed offline.
     for (const job of jobs) {
       const target = queued[job.id];
       if (!target || job.record_type !== "job" || job.voided_at) continue;

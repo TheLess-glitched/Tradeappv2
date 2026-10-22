@@ -286,6 +286,29 @@ export default function JobsScreen() {
     }
   };
 
+  const queueWaitingStatus = async (
+    clientJobId: string,
+    newStatus: "in_progress" | "done",
+  ) => {
+    const userId = session?.user?.id;
+    if (!userId || !businessId) return;
+    try {
+      await enqueueStatus({
+        id: Crypto.randomUUID(),
+        businessId,
+        userId,
+        payload: { clientJobId, newStatus },
+      });
+      if (newStatus === "done") {
+        showToast("Job marked as completed", "It will sync with the job.");
+      }
+    } catch (error) {
+      showFeedback(
+        "Couldn't save the change",
+        error instanceof Error ? error.message : "Please try again.",
+      );
+    }
+  };
   const cycleStatus = async (job: Job) => {
     if (job.record_type !== "job" || job.voided_at) return;
 
@@ -294,6 +317,23 @@ export default function JobsScreen() {
       return;
     }
 
+    const waitingJob = job as ListJob;
+    if (waitingJob.waiting === "pending" && waitingJob.outboxId) {
+      const clientJobId = waitingJob.outboxId;
+      const next: "in_progress" | "done" =
+        job.status === "pending" ? "in_progress" : "done";
+      showFeedback(
+        "Update Status",
+        next === "in_progress"
+          ? 'Change status to "In Progress"?'
+          : "Mark this job as completed?",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Update", onPress: () => void queueWaitingStatus(clientJobId, next) },
+        ],
+      );
+      return;
+    }
     if (job.status === "pending") {
       showFeedback(
         "Update Status",
@@ -384,16 +424,22 @@ export default function JobsScreen() {
     setJobToComplete(null);
   };
 
-  // Status changes made offline show straight away, with a note, until they sync.
   const queuedStatus: Record<number, "in_progress" | "done"> = {};
+  const queuedByClient: Record<string, "in_progress" | "done"> = {};
   const statusProblems: Record<number, { id: string; error: string | null }> = {};
   for (const item of outbox) {
     if (item.kind !== "status") continue;
-    const jobId = item.payload.jobId;
+    const { jobId, clientJobId, newStatus } = item.payload;
     if (item.status === "needs_attention") {
-      statusProblems[jobId] = { id: item.id, error: item.error };
-    } else if (!queuedStatus[jobId] || item.payload.newStatus === "done") {
-      queuedStatus[jobId] = item.payload.newStatus;
+      if (jobId !== undefined) statusProblems[jobId] = { id: item.id, error: item.error };
+      continue;
+    }
+    if (jobId !== undefined) {
+      if (!queuedStatus[jobId] || newStatus === "done") queuedStatus[jobId] = newStatus;
+    } else if (clientJobId) {
+      if (!queuedByClient[clientJobId] || newStatus === "done") {
+        queuedByClient[clientJobId] = newStatus;
+      }
     }
   }
   const rank = (status: string) => (status === "done" ? 2 : status === "in_progress" ? 1 : 0);
@@ -424,7 +470,7 @@ export default function JobsScreen() {
             date: when.toLocaleDateString("en-GB"),
             time: when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
             notes: item.payload.notes,
-            status: "pending" as const,
+            status: queuedByClient[item.id] ?? ("pending" as const),
             created_at: item.occurredAt,
             created_by: session?.user?.id ?? null,
             created_by_name: null,
@@ -521,6 +567,14 @@ export default function JobsScreen() {
               </Text>
             </View>
           ) : null}
+          {job.waiting === "pending" ? (
+            <View style={styles.metaRow}>
+              <Clock size={13} color={colors.textMuted} />
+              <Text style={[styles.jobMetaText, { color: colors.textMuted }]}>
+                Waiting to sync
+              </Text>
+            </View>
+          ) : null}
           {job.statusQueued ? (
             <View style={styles.metaRow}>
               <Clock size={13} color={colors.textMuted} />
@@ -593,12 +647,10 @@ export default function JobsScreen() {
         ) : null}
         
         <View style={styles.jobFooter}>
-          {job.waiting ? (
+          {job.waiting === "needs_attention" ? (
             <View style={[styles.statusBadge, { backgroundColor: colors.surfaceSubtle }]}>
               <Clock size={13} color={colors.textMuted} />
-              <Text style={[styles.statusText, { color: colors.textMuted }]}>
-                {job.waiting === "pending" ? "Waiting to sync" : "Not saved"}
-              </Text>
+              <Text style={[styles.statusText, { color: colors.textMuted }]}>Not saved</Text>
             </View>
           ) : isVoided ? (
             <View style={[styles.statusBadge, { backgroundColor: colors.surfaceSubtle }]}>

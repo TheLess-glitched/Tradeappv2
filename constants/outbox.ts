@@ -5,7 +5,8 @@ import { supabase } from "./supabase";
 export type OutboxKind = "job" | "customer" | "status";
 
 export type StatusPayload = {
-  jobId: number;
+  jobId?: number; // a job already on the server
+  clientJobId?: string; // a job still waiting to sync (its outbox id)
   newStatus: "in_progress" | "done";
 };
 
@@ -236,7 +237,16 @@ export async function removeOutbox(id: string): Promise<void> {
 type SendError = { message: string; code?: string } | null;
 
 async function sendItem(item: OutboxItem): Promise<SendError> {
-    if (item.kind === "status") {
+  if (item.kind === "status") {
+    if (item.payload.clientJobId) {
+      const { error } = await supabase.rpc("record_job_status_by_client_v1", {
+        p_client_id: item.payload.clientJobId,
+        p_new_status: item.payload.newStatus,
+        p_occurred_at: item.occurredAt,
+        p_offline: true,
+      });
+      return error;
+    }
     const { error } = await supabase.rpc("record_job_status_v1", {
       p_job_id: item.payload.jobId,
       p_new_status: item.payload.newStatus,
