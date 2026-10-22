@@ -2,7 +2,12 @@ import * as SQLite from "expo-sqlite";
 import { isNetworkError } from "./network-error";
 import { supabase } from "./supabase";
 
-export type OutboxKind = "job" | "customer";
+export type OutboxKind = "job" | "customer" | "status";
+
+export type StatusPayload = {
+  jobId: number;
+  newStatus: "in_progress" | "done";
+};
 
 export type JobPayload = {
   customerName: string | null;
@@ -32,7 +37,8 @@ type Base = {
 
 export type OutboxItem =
   | (Base & { kind: "job"; payload: JobPayload })
-  | (Base & { kind: "customer"; payload: CustomerPayload });
+  | (Base & { kind: "customer"; payload: CustomerPayload })
+  | (Base & { kind: "status"; payload: StatusPayload });
 
 type Row = {
   id: string;
@@ -99,9 +105,13 @@ function toItem(row: Row): OutboxItem {
     createdAt: row.created_at,
   };
   const payload = JSON.parse(row.payload);
-  return row.kind === "customer"
-    ? { ...base, kind: "customer", payload: payload as CustomerPayload }
-    : { ...base, kind: "job", payload: payload as JobPayload };
+  if (row.kind === "customer") {
+    return { ...base, kind: "customer", payload: payload as CustomerPayload };
+  }
+  if (row.kind === "status") {
+    return { ...base, kind: "status", payload: payload as StatusPayload };
+  }
+  return { ...base, kind: "job", payload: payload as JobPayload };
 }
 
 async function insert(
@@ -112,7 +122,7 @@ async function insert(
     userId: string;
     occurredAt?: string;
   },
-  payload: JobPayload | CustomerPayload,
+  payload: JobPayload | CustomerPayload | StatusPayload
 ): Promise<void> {
   const db = await getDb();
   await db.runAsync(
@@ -150,6 +160,16 @@ export function enqueueCustomer(item: {
   payload: CustomerPayload;
 }): Promise<void> {
   return insert("customer", item, item.payload);
+}
+
+export function enqueueStatus(item: {
+  id: string;
+  businessId: string;
+  userId: string;
+  occurredAt?: string;
+  payload: StatusPayload;
+}): Promise<void> {
+  return insert("status", item, item.payload);
 }
 
 // Oldest first, so things replay in the order they happened.
@@ -216,6 +236,15 @@ export async function removeOutbox(id: string): Promise<void> {
 type SendError = { message: string; code?: string } | null;
 
 async function sendItem(item: OutboxItem): Promise<SendError> {
+    if (item.kind === "status") {
+    const { error } = await supabase.rpc("record_job_status_v1", {
+      p_job_id: item.payload.jobId,
+      p_new_status: item.payload.newStatus,
+      p_occurred_at: item.occurredAt,
+      p_offline: true,
+    });
+    return error;
+  }
   if (item.kind === "customer") {
     const { error } = await supabase.rpc("record_customer_v1", {
       p_client_id: item.id,

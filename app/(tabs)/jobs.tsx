@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Crypto from "expo-crypto";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
   Calendar,
@@ -20,12 +21,15 @@ import {
 import { showFeedback, showToast } from "../../components/app-feedback";
 import VoidRecordDialog from "../../components/void-record-dialog";
 import { formatCurrency } from "../../constants/currency";
+import { isNetworkError } from "../../constants/network-error";
+import { enqueueStatus, OutboxItem, removeOutbox, retryOutbox } from "../../constants/outbox";
 import { normalizePhone } from "../../constants/phone";
 import { customerPhoneByNameQuery, jobsListQuery } from "../../constants/queries";
 import { supabase } from "../../constants/supabase";
 import { getStatusStyle, ThemeColors } from "../../constants/theme";
 import { useAuth } from "../../context/auth-context";
 import { useTheme } from "../../context/theme-context";
+import { useOutbox } from "../../hooks/use-outbox";
 
 type Job = {
   id: number;
@@ -43,6 +47,15 @@ type Job = {
   created_by_name: string | null;
   voided_at: string | null;
   void_reason: string | null;
+};
+
+type ListJob = Job & {
+  statusQueued?: boolean;
+  statusProblem?: { id: string; error: string | null };
+  key: string;
+  outboxId?: string;
+  waiting?: "pending" | "needs_attention";
+  error?: string | null;
 };
 
 const STATUS_LABELS = {
@@ -161,6 +174,20 @@ export default function JobsScreen() {
     }
   }, [isSessionReady, session?.user?.id, fetchJobs]);
 
+  const outbox = useOutbox(session?.user?.id, businessId);
+  const waitingJobItems = outbox.filter(
+    (item): item is Extract<OutboxItem, { kind: "job" }> => item.kind === "job",
+  );
+
+  // When a waiting job syncs, reload so the real row replaces the tagged one.
+  const waitingJobCount = outbox.filter(
+    (item) => item.kind === "job" || item.kind === "status",
+  ).length;
+  const prevWaitingRef = useRef(0);
+  useEffect(() => {
+    if (waitingJobCount < prevWaitingRef.current) void fetchJobs();
+    prevWaitingRef.current = waitingJobCount;
+  }, [waitingJobCount, fetchJobs]);
   const getUsablePhoneForJob = useCallback(
     async (job: Job): Promise<string | null> => {
       if (job.customer_phone) {
@@ -214,7 +241,7 @@ export default function JobsScreen() {
     }
   }, [completedJobId, jobs, getUsablePhoneForJob]);
 
-  const updateStatus = async (
+    const updateStatus = async (
     id: number,
     newStatus: "pending" | "in_progress" | "done",
   ) => {
@@ -226,6 +253,30 @@ export default function JobsScreen() {
       .eq("record_type", "job")
       .is("voided_at", null);
     if (error) {
+      const code = (error as { code?: string }).code;
+      if (
+        newStatus !== "pending" &&
+        !code &&
+        isNetworkError(error) &&
+        session?.user?.id &&
+        businessId
+      ) {
+        try {
+          await enqueueStatus({
+            id: Crypto.randomUUID(),
+            businessId,
+            userId: session.user.id,
+            payload: { jobId: id, newStatus },
+          });
+          return true;
+        } catch (queueError) {
+          showFeedback(
+            "Couldn't save the change",
+            queueError instanceof Error ? queueError.message : "Please try again.",
+          );
+          return false;
+        }
+      }
       showFeedback("Error", error.message);
       return false;
     } else {
@@ -332,11 +383,67 @@ export default function JobsScreen() {
     setJobToComplete(null);
   };
 
-  const filtered = jobs.filter((job) =>
+  // Status changes made offline show straight away, with a note, until they sync.
+  const queuedStatus: Record<number, "in_progress" | "done"> = {};
+  const statusProblems: Record<number, { id: string; error: string | null }> = {};
+  for (const item of outbox) {
+    if (item.kind !== "status") continue;
+    const jobId = item.payload.jobId;
+    if (item.status === "needs_attention") {
+      statusProblems[jobId] = { id: item.id, error: item.error };
+    } else if (!queuedStatus[jobId] || item.payload.newStatus === "done") {
+      queuedStatus[jobId] = item.payload.newStatus;
+    }
+  }
+  const rank = (status: string) => (status === "done" ? 2 : status === "in_progress" ? 1 : 0);
+  const displayJobs = jobs.map((job) => {
+    const queued = queuedStatus[job.id];
+    return queued && rank(queued) > rank(job.status) ? { ...job, status: queued } : job;
+  });
+
+  const filtered = displayJobs.filter((job) =>
     filter === "voided"
       ? job.voided_at != null
       : !job.voided_at && (filter === "all" || job.status === filter),
   );
+
+  // Waiting jobs are pending, so they only belong under "All" and "Pending".
+  const waitingListJobs: ListJob[] =
+    filter === "all" || filter === "pending"
+      ? waitingJobItems.map((item, index) => {
+          const when = new Date(item.occurredAt);
+          return {
+            key: `q-${item.id}`,
+            id: -(index + 1),
+            customer_name: item.payload.customerName,
+            customer_phone: item.payload.customerPhone,
+            service: item.payload.service,
+            record_type: "job" as const,
+            line_total: item.payload.price,
+            date: when.toLocaleDateString("en-GB"),
+            time: when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+            notes: item.payload.notes,
+            status: "pending" as const,
+            created_at: item.occurredAt,
+            created_by: session?.user?.id ?? null,
+            created_by_name: null,
+            voided_at: null,
+            void_reason: null,
+            outboxId: item.id,
+            waiting: item.status,
+            error: item.error,
+          };
+        })
+      : [];
+  const listData: ListJob[] = [
+    ...waitingListJobs,
+    ...filtered.map((job) => ({
+      ...job,
+      key: `j-${job.id}`,
+      statusQueued: queuedStatus[job.id] !== undefined && queuedStatus[job.id] === job.status,
+      statusProblem: statusProblems[job.id],
+    })),
+  ];
 
   const renderFilterHeader = useCallback(
     () => (
@@ -350,7 +457,7 @@ export default function JobsScreen() {
     [isOwner],
   );
 
-  const renderJobItem = useCallback(({ item: job }: { item: Job }) => {
+  const renderJobItem = useCallback(({ item: job }: { item: ListJob }) => {
     const isVoided = job.voided_at != null;
     const statusStyles = getStatusStyle(colors, job.status);
 
@@ -413,6 +520,14 @@ export default function JobsScreen() {
               </Text>
             </View>
           ) : null}
+          {job.statusQueued ? (
+            <View style={styles.metaRow}>
+              <Clock size={13} color={colors.textMuted} />
+              <Text style={[styles.jobMetaText, { color: colors.textMuted }]}>
+                Status change waiting to sync
+              </Text>
+            </View>
+          ) : null}
           {isOwner && job.created_by_name ? (
             <Text style={[styles.jobMetaText, { color: colors.textMuted }]}>
               by {job.created_by_name}
@@ -432,9 +547,59 @@ export default function JobsScreen() {
             </>
           ) : null}
         </View>
+          {job.waiting === "needs_attention" ? (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={[styles.voidReason, { color: colors.dangerText }]}>
+              Not saved: {job.error ?? "The server rejected this job."}
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                <TouchableOpacity
+                  style={[styles.deleteButton, { borderWidth: 1, borderRadius: 8, borderColor: colors.border }]}
+                  onPress={() => job.outboxId && void retryOutbox(job.outboxId)}
+                >
+                  <Text style={[styles.deleteText, { color: colors.text }]}>Retry</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.deleteButton, { borderWidth: 1, borderRadius: 8, borderColor: colors.danger }]}
+                  onPress={() => job.outboxId && void removeOutbox(job.outboxId)}
+                >
+                  <Text style={[styles.deleteText, { color: colors.danger }]}>Discard</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
 
+        {job.statusProblem ? (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={[styles.voidReason, { color: colors.dangerText }]}>
+              Status change not saved: {job.statusProblem.error ?? "The server rejected it."}
+            </Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+              <TouchableOpacity
+                style={[styles.deleteButton, { borderWidth: 1, borderRadius: 8, borderColor: colors.border }]}
+                onPress={() => job.statusProblem && void retryOutbox(job.statusProblem.id)}
+              >
+                <Text style={[styles.deleteText, { color: colors.text }]}>Retry</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.deleteButton, { borderWidth: 1, borderRadius: 8, borderColor: colors.danger }]}
+                onPress={() => job.statusProblem && void removeOutbox(job.statusProblem.id)}
+              >
+                <Text style={[styles.deleteText, { color: colors.danger }]}>Discard</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+        
         <View style={styles.jobFooter}>
-          {isVoided ? (
+          {job.waiting ? (
+            <View style={[styles.statusBadge, { backgroundColor: colors.surfaceSubtle }]}>
+              <Clock size={13} color={colors.textMuted} />
+              <Text style={[styles.statusText, { color: colors.textMuted }]}>
+                {job.waiting === "pending" ? "Waiting to sync" : "Not saved"}
+              </Text>
+            </View>
+          ) : isVoided ? (
             <View style={[styles.statusBadge, { backgroundColor: colors.surfaceSubtle }]}>
               <Text style={[styles.statusText, { color: colors.textMuted }]}>Voided</Text>
             </View>
@@ -494,7 +659,7 @@ export default function JobsScreen() {
               </Text>
             </View>
           )}
-          {isOwner && !isVoided ? (
+            {isOwner && !isVoided && !job.waiting ? (
             <TouchableOpacity
               style={styles.deleteButton}
               onPress={() => setJobToVoid(job)}
@@ -540,8 +705,8 @@ export default function JobsScreen() {
         </View>
       ) : (
         <FlatList
-          data={filtered}
-          keyExtractor={(item) => item.id.toString()}
+          data={listData}
+          keyExtractor={(item) => item.key}
           renderItem={renderJobItem}
           ListHeaderComponent={renderFilterHeader}
           ListEmptyComponent={() => (

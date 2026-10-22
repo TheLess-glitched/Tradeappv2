@@ -27,10 +27,11 @@ import {
   View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
+import UpdateInfo from "../components/update-info";
 import { CURRENCIES, CurrencyCode, DEFAULT_CURRENCY } from "../constants/currency";
 import { DEFAULT_COUNTRY_CODE } from "../constants/phone";
-import { getUnsyncedSalesCountForUser } from "../constants/sale-queue";
 import { signOutIfOnline } from "../constants/safe-sign-out";
+import { getUnsyncedSalesCountForUser } from "../constants/sale-queue";
 import { supabase } from "../constants/supabase";
 import { ThemeMode } from "../constants/theme";
 import { useAuth } from "../context/auth-context";
@@ -555,6 +556,7 @@ export default function SettingsScreen() {
         </View>
 
         <Text style={[styles.version, { color: colors.textMuted }]}>
+          <UpdateInfo />
           TradeApp v1.0.0
         </Text>
       </ScrollView>

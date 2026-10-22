@@ -13,30 +13,52 @@ import {
 } from "react-native";
 import { useTheme } from "../context/theme-context";
 
+export type PickerSource = "recent" | "contact";
+export type RecentCustomer = { id: string; name: string; number: string };
+
 type PickableContact = { id: string; name: string; number: string };
+
+type Row =
+  | { key: string; kind: "header"; title: string }
+  | { key: string; kind: "item"; name: string; number: string; source: PickerSource };
 
 type Props = {
   visible: boolean;
   onClose: () => void;
-  onSelect: (name: string, number: string) => void;
+  onSelect: (name: string, number: string, source: PickerSource) => void;
+  // Saved customers (and ones waiting to sync), shown first.
+  recents?: RecentCustomer[];
+  // Set to false when contacts permission was not granted: only recents are shown.
+  loadContacts?: boolean;
 };
+
+const NO_RECENTS: RecentCustomer[] = [];
+
+function lastDigits(value: string): string {
+  return value.replace(/\D/g, "").slice(-9);
+}
 
 // The sheet only exists while the modal is open, so its state starts fresh
 // (empty search, loading) every time the list is opened.
 function ContactPickerSheet({
   onClose,
   onSelect,
+  recents,
+  loadContacts,
 }: {
   onClose: () => void;
-  onSelect: (name: string, number: string) => void;
+  onSelect: (name: string, number: string, source: PickerSource) => void;
+  recents: RecentCustomer[];
+  loadContacts: boolean;
 }) {
   const { colors } = useTheme();
   const [contacts, setContacts] = useState<PickableContact[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(loadContacts);
   const [failed, setFailed] = useState(false);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
+    if (!loadContacts) return;
     let active = true;
     Contacts.getContactsAsync({
       fields: [Contacts.Fields.PhoneNumbers],
@@ -63,18 +85,49 @@ function ContactPickerSheet({
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadContacts]);
 
-  const filtered = useMemo(() => {
+  const rows = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return contacts;
     const digits = query.replace(/\D/g, "");
-    return contacts.filter(
-      (contact) =>
-        contact.name.toLowerCase().includes(query) ||
-        (digits.length > 0 && contact.number.replace(/\D/g, "").includes(digits)),
+    const matches = (name: string, number: string) =>
+      !query ||
+      name.toLowerCase().includes(query) ||
+      (digits.length > 0 && number.replace(/\D/g, "").includes(digits));
+
+    const recentMatches = recents.filter((r) => matches(r.name, r.number));
+    const recentKeys = new Set(recents.map((r) => lastDigits(r.number)));
+    const contactMatches = contacts.filter(
+      (c) => !recentKeys.has(lastDigits(c.number)) && matches(c.name, c.number),
     );
-  }, [contacts, search]);
+
+    const list: Row[] = [];
+    if (recentMatches.length > 0) {
+      list.push({ key: "h-recent", kind: "header", title: "Your customers" });
+      recentMatches.forEach((r) =>
+        list.push({
+          key: `r-${r.id}`,
+          kind: "item",
+          name: r.name,
+          number: r.number,
+          source: "recent",
+        }),
+      );
+    }
+    if (contactMatches.length > 0) {
+      list.push({ key: "h-contacts", kind: "header", title: "Phone contacts" });
+      contactMatches.forEach((c) =>
+        list.push({
+          key: `c-${c.id}`,
+          kind: "item",
+          name: c.name,
+          number: c.number,
+          source: "contact",
+        }),
+      );
+    }
+    return list;
+  }, [contacts, recents, search]);
 
   return (
     <View style={[styles.overlay, { backgroundColor: colors.modalOverlay }]}>
@@ -85,12 +138,12 @@ function ContactPickerSheet({
         ]}
       >
         <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.text }]}>Choose a contact</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Choose a customer</Text>
           <TouchableOpacity
             onPress={onClose}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             accessibilityRole="button"
-            accessibilityLabel="Close contact list"
+            accessibilityLabel="Close customer list"
           >
             <X size={22} color={colors.textSecondary} />
           </TouchableOpacity>
@@ -112,39 +165,52 @@ function ContactPickerSheet({
           autoCorrect={false}
         />
 
-        {loading ? (
-          <ActivityIndicator style={styles.loader} color={colors.primary} />
-        ) : failed ? (
-          <Text style={[styles.message, { color: colors.textMuted }]}>
-            Couldn&apos;t read your contacts. Close this and try again.
+        {!loadContacts ? (
+          <Text style={[styles.note, { color: colors.textMuted }]}>
+            Contacts access is off, so only saved customers are shown.
           </Text>
-        ) : filtered.length === 0 ? (
+        ) : null}
+
+        {!loading && rows.length === 0 ? (
           <Text style={[styles.message, { color: colors.textMuted }]}>
-            {search ? "No matching contacts" : "No contacts with a phone number"}
+            {failed
+              ? "Could not read your contacts. Close this and try again."
+              : search
+                ? "No matching customers or contacts"
+                : "No customers or contacts yet"}
           </Text>
         ) : (
           <FlatList
-            data={filtered}
-            keyExtractor={(item) => item.id}
+            data={rows}
+            keyExtractor={(item) => item.key}
             keyboardShouldPersistTaps="handled"
             initialNumToRender={20}
             windowSize={7}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[styles.row, { borderBottomColor: colors.border }]}
-                onPress={() => onSelect(item.name, item.number)}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={`Use ${item.name}`}
-              >
-                <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
-                  {item.name}
+            ListFooterComponent={
+              loading ? <ActivityIndicator style={styles.loader} color={colors.primary} /> : null
+            }
+            renderItem={({ item }) =>
+              item.kind === "header" ? (
+                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+                  {item.title}
                 </Text>
-                <Text style={[styles.number, { color: colors.textMuted }]}>
-                  {item.number}
-                </Text>
-              </TouchableOpacity>
-            )}
+              ) : (
+                <TouchableOpacity
+                  style={[styles.row, { borderBottomColor: colors.border }]}
+                  onPress={() => onSelect(item.name, item.number, item.source)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${item.name}`}
+                >
+                  <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text style={[styles.number, { color: colors.textMuted }]}>
+                    {item.number}
+                  </Text>
+                </TouchableOpacity>
+              )
+            }
           />
         )}
       </View>
@@ -152,10 +218,23 @@ function ContactPickerSheet({
   );
 }
 
-export default function ContactPickerModal({ visible, onClose, onSelect }: Props) {
+export default function ContactPickerModal({
+  visible,
+  onClose,
+  onSelect,
+  recents = NO_RECENTS,
+  loadContacts = true,
+}: Props) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      {visible ? <ContactPickerSheet onClose={onClose} onSelect={onSelect} /> : null}
+      {visible ? (
+        <ContactPickerSheet
+          onClose={onClose}
+          onSelect={onSelect}
+          recents={recents}
+          loadContacts={loadContacts}
+        />
+      ) : null}
     </Modal>
   );
 }
@@ -185,8 +264,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 8,
   },
-  loader: { marginTop: 32 },
+  note: { fontSize: 12, marginBottom: 8 },
+  loader: { marginTop: 16, marginBottom: 16 },
   message: { textAlign: "center", marginTop: 32, fontSize: 14 },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    marginTop: 12,
+    marginBottom: 4,
+  },
   row: { paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
   name: { fontSize: 15, fontWeight: "600" },
   number: { fontSize: 13, marginTop: 2 },

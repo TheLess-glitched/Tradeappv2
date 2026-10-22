@@ -2,6 +2,8 @@ import {
   catalogueListQuery,
   customersListQuery,
   firstRecordQuery,
+  jobCataloguePickerQuery,
+  jobCustomerPickerQuery,
   jobsListQuery,
   trackedCatalogueListQuery,
 } from "./queries";
@@ -25,6 +27,8 @@ export async function warmSellingData(
   await quietly(() => trackedCatalogueListQuery(businessId));
   await quietly(() => catalogueListQuery(businessId));
   await quietly(() => customersListQuery(businessId));
+  await quietly(() => jobCustomerPickerQuery(businessId));
+  await quietly(() => jobCataloguePickerQuery(businessId));
   await quietly(() => jobsListQuery(businessId));
   await quietly(() => fetchTodayRecords(businessId));
 

@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
-  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -18,7 +17,7 @@ import {
   View,
 } from "react-native";
 import { showFeedback } from "../components/app-feedback";
-import ContactPickerModal from "../components/contact-picker-modal";
+import ContactPickerModal, { PickerSource } from "../components/contact-picker-modal";
 import { COUNTRIES, Country, DEFAULT_COUNTRY } from "../constants/countries";
 import { CURRENCIES, formatCurrency } from "../constants/currency";
 import { isNetworkError } from "../constants/network-error";
@@ -105,7 +104,16 @@ export default function NewJobScreen() {
     }
     return [...waiting, ...customers];
   }, [customers, outbox]);
-  const [customerPickerVisible, setCustomerPickerVisible] = useState(false);
+  const recentCustomers = useMemo(
+    () =>
+      displayCustomers.map((c) => ({
+        id: String(c.id),
+        name: c.name,
+        number: c.phone,
+      })),
+    [displayCustomers],
+  );
+  const [contactsAllowed, setContactsAllowed] = useState(false);
   const [contactPickerVisible, setContactPickerVisible] = useState(false);
   const wasSelectedFromPickerRef = useRef(false);
   const [estimatedFinishAt, setEstimatedFinishAt] = useState<Date | null>(null);
@@ -225,35 +233,33 @@ export default function NewJobScreen() {
     setCataloguePickerVisible(false);
   };
 
-  const handleCustomerSelect = (customer: Customer) => {
-    wasSelectedFromPickerRef.current = true;
-    setCustomerName(customer.name);
-    setCustomerPhone(customer.phone);
-    setCustomerPickerVisible(false);
-  };
-
-  const handleImportFromContacts = async () => {
-    const { status } = await Contacts.requestPermissionsAsync();
-    if (status !== Contacts.PermissionStatus.GRANTED) {
-      showFeedback(
-        "Contacts permission needed",
-        "TradeApp needs contacts access to import a customer's name and phone number.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Open Settings", onPress: () => Linking.openSettings() },
-        ],
-      );
-      return;
+    const handleChooseCustomer = async () => {
+    let allowed = false;
+    try {
+      const { status } = await Contacts.requestPermissionsAsync();
+      allowed = status === Contacts.PermissionStatus.GRANTED;
+    } catch {
+      allowed = false;
     }
+    // Without permission the list still opens, with saved customers only.
+    setContactsAllowed(allowed);
     setContactPickerVisible(true);
   };
 
-  const handleContactChosen = (contactName: string, contactNumber: string) => {
-    // Not "selected from the saved customers", so the job also adds this
-    // person to Customers when the number is new.
-    wasSelectedFromPickerRef.current = false;
+  const handleContactChosen = (
+    contactName: string,
+    contactNumber: string,
+    source: PickerSource,
+  ) => {
+    // A saved customer is already in Customers. A phone contact is new, so the
+    // job adds it to Customers when the number is not there yet.
+    wasSelectedFromPickerRef.current = source === "recent";
     setCustomerName(contactName.trim());
-    setCustomerPhone(normalizePhone(contactNumber, defaultCountryCode) ?? "");
+    setCustomerPhone(
+      source === "recent"
+        ? contactNumber
+        : (normalizePhone(contactNumber, defaultCountryCode) ?? ""),
+    );
     setContactPickerVisible(false);
   };
 
@@ -479,7 +485,7 @@ export default function NewJobScreen() {
           <Text style={[styles.label, { color: colors.textSecondary }]}>Customer Name (Optional)</Text>
           <TouchableOpacity
             style={[styles.customerPickerButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
-            onPress={() => setCustomerPickerVisible(true)}
+            onPress={() => void handleChooseCustomer()}
             activeOpacity={0.7}
           >
             <Text style={[styles.cataloguePickerText, { color: colors.textSecondary }]}>Choose Existing Customer</Text>
@@ -546,26 +552,7 @@ export default function NewJobScreen() {
           </View>
         </View>
 
-            <TouchableOpacity
-              style={{
-                borderWidth: 1,
-                borderRadius: 10,
-                paddingVertical: 12,
-                alignItems: "center",
-                marginBottom: 16,
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-              }}
-              onPress={() => void handleImportFromContacts()}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="Import customer from contacts"
-            >
-              <Text style={{ color: colors.text, fontSize: 14, fontWeight: "600" }}>
-                Import from contacts
-              </Text>
-            </TouchableOpacity>
-
+      
         <View style={styles.fieldWrapper}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>Service</Text>
           <TouchableOpacity
@@ -941,40 +928,6 @@ export default function NewJobScreen() {
         </View>
       </Modal>
 
-      <Modal
-        visible={customerPickerVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setCustomerPickerVisible(false)}
-      >
-        <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}> 
-          <View style={[styles.countryModalContent, { backgroundColor: colors.modalBackground, borderColor: colors.modalBorder }]}>
-            <View style={styles.countryModalHeader}>
-              <Text style={[styles.countryModalTitle, { color: colors.text }]}>Choose Existing Customer</Text>
-              <TouchableOpacity onPress={() => setCustomerPickerVisible(false)} style={styles.closeBtn}>
-                <X size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <FlatList
-              data={displayCustomers}
-              keyExtractor={(item) => String(item.id)}
-              keyboardShouldPersistTaps="handled"
-              ListEmptyComponent={<Text style={[styles.emptyPickerText, { color: colors.textMuted }]}>No saved customers available.</Text>}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.customerPickerItem}
-                  onPress={() => {
-                    handleCustomerSelect(item);
-                  }}
-                >
-                  <Text style={[styles.itemName, { color: colors.text }]}>{item.name}</Text>
-                  <Text style={[styles.itemDialCode, { color: colors.textSecondary }]}>{item.phone}</Text>
-                </TouchableOpacity>
-              )}
-            />
-          </View>
-        </View>
-      </Modal>
 
       <Modal
         visible={cataloguePickerVisible}
@@ -1427,11 +1380,13 @@ export default function NewJobScreen() {
           </View>
         </View>
       </Modal>
-        <ContactPickerModal
+      <ContactPickerModal
         visible={contactPickerVisible}
         onClose={() => setContactPickerVisible(false)}
         onSelect={handleContactChosen}
-        />
+        recents={recentCustomers}
+        loadContacts={contactsAllowed}
+      />
     </KeyboardAvoidingView>
   );
 }
